@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Barbarian Last Stand</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="appRoot">
+    <section id="homeScreen" class="screen">
+      <div class="panel home-panel">
+        <h1>Barbarian Last Stand</h1>
+        <p class="subtitle">Human Barbarian survival prototype</p>
+        <div class="home-actions">
+          <button id="createCharacterBtn" class="btn">Create Character</button>
+          <button id="startRunBtn" class="btn btn-primary" disabled>Start Run</button>
+        </div>
+        <p id="homeStatus" class="status">Create a character to begin.</p>
+      </div>
+
+      <div class="character-shell">
+        <div class="panel characters-panel">
+          <h2>Saved Characters</h2>
+          <div id="characterList" class="character-list"></div>
+        </div>
+
+        <div class="panel details-panel">
+          <h2>Character Progression</h2>
+          <div id="skillTreeEmpty" class="skill-empty">Select a character to view skill trees.</div>
+          <div id="skillTreeView" class="hidden">
+            <div id="characterSummary" class="character-summary"></div>
+            <div class="skill-tabs">
+              <button id="weaponsTabBtn" class="btn skill-tab active" type="button">Weapons</button>
+              <button id="classTabBtn" class="btn skill-tab" type="button">Class</button>
+            </div>
+            <div id="skillTreeContent" class="skill-content"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="gameScreen" class="screen hidden">
+      <canvas id="gameCanvas"></canvas>
+      <div id="hud" class="hud">
+        <div class="hud-row">
+          <span id="hudName">-</span>
+          <span id="hudHp">HP: -</span>
+          <span id="hudLevel">Level: -</span>
+          <span id="hudGold">Gold: 0</span>
+          <span id="hudLegacy">Legacy XP: 0</span>
+          <span id="hudTimer">00:00</span>
+        </div>
+        <div class="xp-track">
+          <div id="xpFill" class="xp-fill"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="createCharacterModal" class="overlay hidden">
+    <div class="overlay-card">
+      <h2>Create Character</h2>
+      <label for="characterNameInput">Name</label>
+      <input id="characterNameInput" type="text" maxlength="16" placeholder="Enter name">
+      <p class="locked-row">Race: Human (locked)</p>
+      <p class="locked-row">Class: Barbarian (locked)</p>
+      <div class="overlay-actions">
+        <button id="saveCharacterBtn" class="btn btn-primary">Save Character</button>
+        <button id="cancelCharacterBtn" class="btn">Cancel</button>
+      </div>
+      <p id="createCharacterError" class="error hidden"></p>
+    </div>
+  </div>
+
+  <div id="levelUpOverlay" class="overlay hidden">
+    <div class="overlay-card wide">
+      <h2>Level Up</h2>
+      <p>Choose one upgrade</p>
+      <div id="levelUpOptions" class="upgrade-options"></div>
+    </div>
+  </div>
+
+  <div id="pauseOverlay" class="overlay hidden">
+    <div class="overlay-card">
+      <h2>Paused</h2>
+      <div class="overlay-actions column">
+        <button id="resumeBtn" class="btn btn-primary">Resume</button>
+        <button id="restartBtn" class="btn">Restart Run</button>
+        <button id="returnHomeBtn" class="btn">Return Home</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="endRunOverlay" class="overlay hidden">
+    <div class="overlay-card">
+      <h2>Run Complete</h2>
+      <div id="endRunStats" class="end-stats"></div>
+      <div class="overlay-actions column">
+        <button id="playAgainBtn" class="btn btn-primary">Play Again</button>
+        <button id="endReturnHomeBtn" class="btn">Return Home</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="save.js"></script>
+  <script src="ui.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
