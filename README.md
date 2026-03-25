@@ -20,6 +20,8 @@ Local-only browser roguelike survival prototype built with HTML, CSS, and vanill
 Home screen includes a read-only skill tree panel with tabs:
 - `Weapons` (Axe + Javelin tree outline)
 - `Class` (Barbarian concept draft with branch cards, point spending, and capstone previews)
+- `Inventory` (character-specific equipment slots + 3 storage tabs with 30 slots each)
+  - supports drag-and-drop moving between equipment and storage slots
 
 No backend, package install, or build step is required.
 

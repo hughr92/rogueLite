@@ -124,9 +124,15 @@
       this.ui.init({
         onCreateCharacter: (name) => this.handleCreateCharacter(name),
         onSelectCharacter: (id) => this.handleSelectCharacter(id),
+        onDeleteCharacter: (characterId) => this.handleDeleteCharacter(characterId),
         onStartRun: () => this.startRunFromSelection(),
         onChooseUpgrade: (upgradeId) => this.chooseUpgrade(upgradeId),
         onSpendClassPoint: (branchId, nodeId) => this.handleSpendClassPoint(branchId, nodeId),
+        onMoveInventoryItem: (fromLocation, toLocation) => this.handleMoveInventoryItem(fromLocation, toLocation),
+        onBuyMerchantItem: (listingId) => this.handleBuyMerchantItem(listingId),
+        onSellInventoryItem: (location) => this.handleSellInventoryItem(location),
+        onBuybackMerchantItem: (buybackId) => this.handleBuybackMerchantItem(buybackId),
+        onClaimQuestReward: (questId) => this.handleClaimQuestReward(questId),
         onResume: () => this.resumeRun(),
         onRestart: () => this.restartRun(),
         onReturnHome: () => this.returnHome(),
@@ -183,9 +189,7 @@
       if (this.currentRun) {
         this.currentRun.world.width = width;
         this.currentRun.world.height = height;
-        const player = this.currentRun.player;
-        player.x = clamp(player.x, player.radius, width - player.radius);
-        player.y = clamp(player.y, player.radius, height - player.radius);
+        this.centerPlayerInWorld();
       }
     }
 
@@ -250,13 +254,29 @@
       }
     }
 
-    handleSpendClassPoint(branchId, nodeId) {
+    handleDeleteCharacter(characterId) {
+      const deletedCharacter = this.characters.find((character) => character.id === characterId);
+      const didDelete = SAVE.deleteCharacter(characterId);
+      if (!didDelete) {
+        this.ui.setHomeStatus("Could not delete character.");
+        return;
+      }
+      this.selectedCharacterId = null;
+      this.refreshCharacters(false);
+      if (deletedCharacter) {
+        this.ui.setHomeStatus(`${deletedCharacter.name} was deleted.`);
+      }
+    }
+
+    handleSpendClassPoint(attributeId) {
       const selected = this.getSelectedCharacter();
       if (!selected) return;
 
-      const spendResult = SAVE.spendClassSkillPoint(selected.id, branchId, nodeId);
+      const spendResult = SAVE.spendAttributePoint
+        ? SAVE.spendAttributePoint(selected.id, attributeId)
+        : SAVE.spendClassSkillPoint(selected.id, attributeId, attributeId);
       if (!spendResult || !spendResult.ok) {
-        this.ui.setHomeStatus((spendResult && spendResult.error) || "Could not spend class skill point.");
+        this.ui.setHomeStatus((spendResult && spendResult.error) || "Could not spend attribute point.");
         return;
       }
 
@@ -266,8 +286,1148 @@
       if (updated) {
         this.ui.renderCharacterDetails(updated, { resetTab: false });
         this.ui.setHomeStatus(
-          `${updated.name} is Legacy Lv.${updated.legacyLevel} with ${updated.classSkillPoints} class points remaining.`
+          `${updated.name} is Legacy Lv.${updated.legacyLevel} with ${updated.attributePoints || 0} attribute points remaining.`
         );
+      }
+    }
+
+    handleMoveInventoryItem(fromLocation, toLocation) {
+      const selected = this.getSelectedCharacter();
+      if (!selected) return;
+
+      try {
+        const updated = SAVE.moveInventoryItem(selected.id, fromLocation, toLocation);
+        if (!updated) {
+          this.ui.setHomeStatus("Could not move item.");
+          return;
+        }
+        this.characters = SAVE.listCharacters();
+        const refreshed = this.getSelectedCharacter();
+        this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
+        if (refreshed) {
+          this.ui.renderCharacterDetails(refreshed, { resetTab: false });
+        }
+      } catch (error) {
+        this.ui.setHomeStatus(error && error.message ? error.message : "Invalid inventory move.");
+      }
+    }
+
+    handleBuyMerchantItem(listingId) {
+      const selected = this.getSelectedCharacter();
+      if (!selected) return;
+
+      const result = SAVE.purchaseMerchantItem(selected.id, listingId);
+      if (!result || !result.ok) {
+        this.ui.setHomeStatus((result && result.error) || "Could not complete purchase.");
+        return;
+      }
+
+      const purchase = result.purchase || {};
+      const storageLocation = purchase.storageLocation || null;
+      this.characters = SAVE.listCharacters();
+      const refreshed = this.getSelectedCharacter();
+      this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
+      if (refreshed) {
+        this.ui.renderCharacterDetails(refreshed, { resetTab: false });
+        if (storageLocation && this.ui.revealStorageLocation) {
+          this.ui.revealStorageLocation(refreshed, storageLocation);
+        }
+      }
+      const storageTabLabelMap = {
+        general: "General",
+        reserve1: "Tab 2",
+        reserve2: "Tab 3"
+      };
+      const storageLocationText =
+        storageLocation &&
+        typeof storageLocation === "object" &&
+        typeof storageLocation.tabId === "string" &&
+        Number.isInteger(storageLocation.index)
+          ? `${storageTabLabelMap[storageLocation.tabId] || storageLocation.tabId}, Slot ${storageLocation.index + 1}`
+          : "";
+      if (purchase.itemName) {
+        this.ui.setHomeStatus(
+          storageLocationText
+            ? `Purchased ${purchase.itemName} for ${purchase.price || 0} gold. Stored in ${storageLocationText}.`
+            : `Purchased ${purchase.itemName} for ${purchase.price || 0} gold.`
+        );
+      } else {
+        this.ui.setHomeStatus(storageLocationText ? `Purchase complete. Stored in ${storageLocationText}.` : "Purchase complete.");
+      }
+    }
+
+    handleSellInventoryItem(location) {
+      const selected = this.getSelectedCharacter();
+      if (!selected) return;
+
+      const result = SAVE.sellInventoryItem(selected.id, location);
+      if (!result || !result.ok) {
+        this.ui.setHomeStatus((result && result.error) || "Could not sell item.");
+        return;
+      }
+
+      this.characters = SAVE.listCharacters();
+      const refreshed = this.getSelectedCharacter();
+      this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
+      if (refreshed) {
+        this.ui.renderCharacterDetails(refreshed, { resetTab: false });
+      }
+      const sale = result.sale || {};
+      if (sale.itemName) {
+        this.ui.setHomeStatus(`Sold ${sale.itemName} for ${sale.price || 0} gold.`);
+      } else {
+        this.ui.setHomeStatus(`Item sold for ${sale.price || 0} gold.`);
+      }
+    }
+
+    handleBuybackMerchantItem(buybackId) {
+      const selected = this.getSelectedCharacter();
+      if (!selected) return;
+
+      const result = SAVE.buybackMerchantItem(selected.id, buybackId);
+      if (!result || !result.ok) {
+        this.ui.setHomeStatus((result && result.error) || "Could not buy back item.");
+        return;
+      }
+
+      const purchase = result.purchase || {};
+      const storageLocation = purchase.storageLocation || null;
+      const storageTabLabelMap = {
+        general: "General",
+        reserve1: "Tab 2",
+        reserve2: "Tab 3"
+      };
+      const storageLocationText =
+        storageLocation &&
+        typeof storageLocation === "object" &&
+        typeof storageLocation.tabId === "string" &&
+        Number.isInteger(storageLocation.index)
+          ? `${storageTabLabelMap[storageLocation.tabId] || storageLocation.tabId}, Slot ${storageLocation.index + 1}`
+          : "";
+
+      this.characters = SAVE.listCharacters();
+      const refreshed = this.getSelectedCharacter();
+      this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
+      if (refreshed) {
+        this.ui.renderCharacterDetails(refreshed, { resetTab: false });
+        if (storageLocation && this.ui.revealStorageLocation) {
+          this.ui.revealStorageLocation(refreshed, storageLocation);
+        }
+      }
+
+      if (purchase.itemName) {
+        this.ui.setHomeStatus(
+          storageLocationText
+            ? `Bought back ${purchase.itemName} for ${purchase.price || 0} gold. Stored in ${storageLocationText}.`
+            : `Bought back ${purchase.itemName} for ${purchase.price || 0} gold.`
+        );
+      } else {
+        this.ui.setHomeStatus(
+          storageLocationText
+            ? `Buyback complete. Stored in ${storageLocationText}.`
+            : "Buyback complete."
+        );
+      }
+    }
+
+    handleClaimQuestReward(questId) {
+      const selected = this.getSelectedCharacter();
+      if (!selected) return;
+      if (!SAVE.claimQuestReward) {
+        this.ui.setHomeStatus("Quest claiming is not available.");
+        return;
+      }
+
+      const result = SAVE.claimQuestReward(selected.id, questId);
+      if (!result || !result.ok) {
+        this.ui.setHomeStatus((result && result.error) || "Could not claim quest reward.");
+        return;
+      }
+
+      this.characters = SAVE.listCharacters();
+      const refreshed = this.getSelectedCharacter();
+      this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
+      if (refreshed) {
+        this.ui.renderCharacterDetails(refreshed, { resetTab: false });
+      }
+
+      const claim = result.claim || {};
+      if (claim.questTitle) {
+        this.ui.setHomeStatus(`${claim.questTitle} claimed. ${claim.rewardLabel || "Reward unlocked."}`);
+      } else {
+        this.ui.setHomeStatus("Quest reward claimed.");
+      }
+    }
+
+    getSwarmConfig() {
+      return DATA.SWARM_EVENTS || {};
+    }
+
+    rollSwarmTimeWindow(windowConfig, fallbackMin, fallbackMax) {
+      const parsedMin = Number(windowConfig && windowConfig.min);
+      const parsedMax = Number(windowConfig && windowConfig.max);
+      const min = Number.isNaN(parsedMin) ? fallbackMin : parsedMin;
+      const max = Number.isNaN(parsedMax) ? fallbackMax : parsedMax;
+      const low = Math.max(1, Math.min(min, max));
+      const high = Math.max(low, Math.max(min, max));
+      return randRange(low, high);
+    }
+
+    createInitialSwarmState() {
+      const swarmConfig = this.getSwarmConfig();
+      if (!swarmConfig || swarmConfig.enabled === false) {
+        return {
+          enabled: false,
+          nextEventAt: Number.POSITIVE_INFINITY,
+          warningTimer: 0,
+          activeTimer: 0,
+          pendingEvent: null,
+          currentEvent: null
+        };
+      }
+
+      return {
+        enabled: true,
+        nextEventAt: this.rollSwarmTimeWindow(swarmConfig.firstSwarmDelaySeconds, 40, 55),
+        warningTimer: 0,
+        activeTimer: 0,
+        pendingEvent: null,
+        currentEvent: null
+      };
+    }
+
+    getMagnetPowerupConfig() {
+      const powerups = DATA.POWERUPS || {};
+      const magnet = powerups.magnet || {};
+      const drop = magnet.drop || {};
+      const effect = magnet.effect || {};
+      const visual = magnet.visual || {};
+
+      return {
+        id: magnet.id || "magnet",
+        label: magnet.label || "Magnet",
+        drop: {
+          requiresUnlock: drop.requiresUnlock !== false,
+          checkIntervalSeconds: Math.max(1, Number(drop.checkIntervalSeconds || 10)),
+          baseChancePerCheck: clamp(Number(drop.baseChancePerCheck || 0.02), 0, 1),
+          badLuckRampSeconds: Math.max(1, Number(drop.badLuckRampSeconds || 240)),
+          maxBadLuckBonusChance: clamp(Number(drop.maxBadLuckBonusChance || 0.08), 0, 1),
+          firstDropDelaySeconds: Math.max(0, Number(drop.firstDropDelaySeconds || 45)),
+          minSecondsBetweenDrops: Math.max(0, Number(drop.minSecondsBetweenDrops || 150)),
+          maxActiveOnGround: Math.max(1, Math.floor(Number(drop.maxActiveOnGround || 1))),
+          minSpawnDistanceFromPlayer: Math.max(24, Number(drop.minSpawnDistanceFromPlayer || 85)),
+          maxSpawnDistanceFromPlayer: Math.max(24, Number(drop.maxSpawnDistanceFromPlayer || 260)),
+          spawnEdgePadding: Math.max(0, Number(drop.spawnEdgePadding || 24))
+        },
+        effect: {
+          pullSpeed: Math.max(200, Number(effect.pullSpeed || 1400)),
+          pullDurationSeconds: Math.max(0.2, Number(effect.pullDurationSeconds || 1.5))
+        },
+        visual: {
+          radius: Math.max(5, Number(visual.radius || 8)),
+          fillColor: visual.fillColor || "#76d68c",
+          ringColor: visual.ringColor || "#c6ffdb"
+        }
+      };
+    }
+
+    getBattleFuryPowerupConfig() {
+      const powerups = DATA.POWERUPS || {};
+      const fury = powerups.battle_fury || {};
+      const drop = fury.drop || {};
+      const effect = fury.effect || {};
+      const visual = fury.visual || {};
+
+      return {
+        id: fury.id || "battle_fury",
+        label: fury.label || "Battle Fury",
+        drop: {
+          requiresUnlock: drop.requiresUnlock !== false,
+          chanceOnEnemyKill: clamp(Number(drop.chanceOnEnemyKill || 0.02), 0, 1),
+          firstDropDelaySeconds: Math.max(0, Number(drop.firstDropDelaySeconds || 35)),
+          minSecondsBetweenDrops: Math.max(0, Number(drop.minSecondsBetweenDrops || 55)),
+          maxActiveOnGround: Math.max(1, Math.floor(Number(drop.maxActiveOnGround || 1)))
+        },
+        effect: {
+          damageMultiplier: Math.max(1, Number(effect.damageMultiplier || 1.35)),
+          attackSpeedMultiplier: Math.max(1, Number(effect.attackSpeedMultiplier || 1.3)),
+          durationSeconds: Math.max(0.5, Number(effect.durationSeconds || 10))
+        },
+        visual: {
+          radius: Math.max(5, Number(visual.radius || 8)),
+          fillColor: visual.fillColor || "#ff9f5f",
+          ringColor: visual.ringColor || "#ffd5b0"
+        }
+      };
+    }
+
+    getHealingOrbPowerupConfig() {
+      const powerups = DATA.POWERUPS || {};
+      const healingOrb = powerups.healing_orb || {};
+      const drop = healingOrb.drop || {};
+      const effect = healingOrb.effect || {};
+      const visual = healingOrb.visual || {};
+
+      return {
+        id: healingOrb.id || "healing_orb",
+        label: healingOrb.label || "Healing Orb",
+        drop: {
+          requiresUnlock: drop.requiresUnlock !== false,
+          checkIntervalSeconds: Math.max(1, Number(drop.checkIntervalSeconds || 10)),
+          baseChancePerCheck: clamp(Number(drop.baseChancePerCheck || 0.3), 0, 1),
+          badLuckRampSeconds: Math.max(1, Number(drop.badLuckRampSeconds || 160)),
+          maxBadLuckBonusChance: clamp(Number(drop.maxBadLuckBonusChance || 0.35), 0, 1),
+          firstDropDelaySeconds: Math.max(0, Number(drop.firstDropDelaySeconds || 24)),
+          minSecondsBetweenDrops: Math.max(0, Number(drop.minSecondsBetweenDrops || 120)),
+          maxActiveOnGround: Math.max(1, Math.floor(Number(drop.maxActiveOnGround || 1))),
+          minSpawnDistanceFromPlayer: Math.max(24, Number(drop.minSpawnDistanceFromPlayer || 70)),
+          maxSpawnDistanceFromPlayer: Math.max(24, Number(drop.maxSpawnDistanceFromPlayer || 220)),
+          spawnEdgePadding: Math.max(0, Number(drop.spawnEdgePadding || 22))
+        },
+        effect: {
+          healAmount: Math.max(1, Math.floor(Number(effect.healAmount || 15)))
+        },
+        visual: {
+          radius: Math.max(5, Number(visual.radius || 8)),
+          fillColor: visual.fillColor || "#7ee28e",
+          ringColor: visual.ringColor || "#d4ffdc"
+        }
+      };
+    }
+
+    getGoldPickupMultiplier() {
+      return clamp(Number((DATA.RUN && DATA.RUN.goldPickupMultiplier) || 1), 0, 2);
+    }
+
+    calculateScaledGoldPickup(baseValue) {
+      const run = this.currentRun;
+      if (!run) return 0;
+      const multiplier = this.getGoldPickupMultiplier();
+      const base = Math.max(0, Number(baseValue || 0));
+      const carry = Math.max(0, Number((run.stats && run.stats.goldPickupCarry) || 0));
+      const total = base * multiplier + carry;
+      const whole = Math.max(0, Math.floor(total));
+      run.stats.goldPickupCarry = Math.max(0, total - whole);
+      return whole;
+    }
+
+    getObstacleConfig() {
+      const config = DATA.OBSTACLES || {};
+      return {
+        enabled: config.enabled !== false,
+        minCount: Math.max(0, Math.floor(Number(config.minCount || 6))),
+        maxCount: Math.max(0, Math.floor(Number(config.maxCount || 9))),
+        minRadius: Math.max(10, Number(config.minRadius || 22)),
+        maxRadius: Math.max(10, Number(config.maxRadius || 44)),
+        minGap: Math.max(0, Number(config.minGap || 14)),
+        edgePadding: Math.max(0, Number(config.edgePadding || 30)),
+        minDistanceFromPlayerStart: Math.max(0, Number(config.minDistanceFromPlayerStart || 95)),
+        spawnAreaWidthMultiplier: Math.max(1, Number(config.spawnAreaWidthMultiplier || 3.2)),
+        spawnAreaHeightMultiplier: Math.max(1, Number(config.spawnAreaHeightMultiplier || 3.2)),
+        playerCollisionPadding: Math.max(0, Number(config.playerCollisionPadding || 2)),
+        enemyCollisionPadding: Math.max(0, Number(config.enemyCollisionPadding || 1)),
+        fillColor: config.fillColor || "rgba(78, 88, 112, 0.85)",
+        strokeColor: config.strokeColor || "rgba(188, 201, 229, 0.36)"
+      };
+    }
+
+    isCircleOverlappingAnyObstacle(x, y, radius, obstacles, padding) {
+      const list = Array.isArray(obstacles) ? obstacles : [];
+      const extraPadding = Math.max(0, Number(padding || 0));
+      for (let i = 0; i < list.length; i += 1) {
+        const obstacle = list[i];
+        if (!obstacle) continue;
+        const dx = x - obstacle.x;
+        const dy = y - obstacle.y;
+        const minDistance = Math.max(0, Number(radius || 0)) + Math.max(0, Number(obstacle.radius || 0)) + extraPadding;
+        if (dx * dx + dy * dy < minDistance * minDistance) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    createRunObstacles(world, player) {
+      const config = this.getObstacleConfig();
+      if (!config.enabled) return [];
+      const minCount = Math.min(config.minCount, config.maxCount);
+      const maxCount = Math.max(config.minCount, config.maxCount);
+      const targetCount = randInt(minCount, maxCount);
+      if (targetCount <= 0) return [];
+
+      const centerX = player && typeof player.x === "number" ? player.x : world.width * 0.5;
+      const centerY = player && typeof player.y === "number" ? player.y : world.height * 0.5;
+      const halfRangeX = (world.width * config.spawnAreaWidthMultiplier) * 0.5;
+      const halfRangeY = (world.height * config.spawnAreaHeightMultiplier) * 0.5;
+      const obstacles = [];
+
+      for (let i = 0; i < targetCount; i += 1) {
+        let placed = false;
+        for (let attempt = 0; attempt < 70; attempt += 1) {
+          const radius = randRange(config.minRadius, config.maxRadius);
+          const minX = centerX - halfRangeX + config.edgePadding + radius;
+          const maxX = centerX + halfRangeX - config.edgePadding - radius;
+          const minY = centerY - halfRangeY + config.edgePadding + radius;
+          const maxY = centerY + halfRangeY - config.edgePadding - radius;
+          if (maxX <= minX || maxY <= minY) break;
+
+          const x = randRange(minX, maxX);
+          const y = randRange(minY, maxY);
+          const toPlayer = Math.hypot(x - centerX, y - centerY);
+          if (toPlayer < config.minDistanceFromPlayerStart + radius + (player ? player.radius : 0)) continue;
+          if (this.isCircleOverlappingAnyObstacle(x, y, radius, obstacles, config.minGap)) continue;
+
+          obstacles.push({
+            id: this.nextEntityId(),
+            x,
+            y,
+            radius
+          });
+          placed = true;
+          break;
+        }
+        if (!placed) continue;
+      }
+
+      return obstacles;
+    }
+
+    canApplyWorldShiftWithoutPlayerObstacleCollision(shiftX, shiftY) {
+      const run = this.currentRun;
+      if (!run || !run.player) return true;
+      const obstacles = (run.entities && run.entities.obstacles) || [];
+      if (!obstacles.length) return true;
+      const player = run.player;
+      const config = this.getObstacleConfig();
+      const padding = config.playerCollisionPadding;
+      for (let i = 0; i < obstacles.length; i += 1) {
+        const obstacle = obstacles[i];
+        if (!obstacle) continue;
+        const nextX = obstacle.x + shiftX;
+        const nextY = obstacle.y + shiftY;
+        const dx = player.x - nextX;
+        const dy = player.y - nextY;
+        const minDistance = player.radius + obstacle.radius + padding;
+        if (dx * dx + dy * dy < minDistance * minDistance) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    applyWorldShiftWithObstacleCollision(shiftX, shiftY) {
+      const run = this.currentRun;
+      if (!run) return { x: 0, y: 0 };
+      const obstacles = (run.entities && run.entities.obstacles) || [];
+      if (!obstacles.length) {
+        this.applyWorldShift(shiftX, shiftY);
+        return { x: shiftX, y: shiftY };
+      }
+
+      const distance = Math.hypot(shiftX, shiftY);
+      const steps = Math.max(1, Math.ceil(distance / 6));
+      const stepX = shiftX / steps;
+      const stepY = shiftY / steps;
+      let appliedX = 0;
+      let appliedY = 0;
+
+      for (let i = 0; i < steps; i += 1) {
+        if (stepX !== 0 && this.canApplyWorldShiftWithoutPlayerObstacleCollision(stepX, 0)) {
+          this.applyWorldShift(stepX, 0);
+          appliedX += stepX;
+        }
+        if (stepY !== 0 && this.canApplyWorldShiftWithoutPlayerObstacleCollision(0, stepY)) {
+          this.applyWorldShift(0, stepY);
+          appliedY += stepY;
+        }
+      }
+
+      return { x: appliedX, y: appliedY };
+    }
+
+    resolveEnemyObstacleCollisions(enemies) {
+      const run = this.currentRun;
+      if (!run) return;
+      const obstacles = (run.entities && run.entities.obstacles) || [];
+      if (!obstacles.length || !Array.isArray(enemies) || !enemies.length) return;
+      const config = this.getObstacleConfig();
+      const padding = config.enemyCollisionPadding;
+
+      enemies.forEach((enemy) => {
+        if (!enemy || enemy.dead) return;
+        for (let pass = 0; pass < 2; pass += 1) {
+          obstacles.forEach((obstacle) => {
+            if (!obstacle) return;
+            let dx = enemy.x - obstacle.x;
+            let dy = enemy.y - obstacle.y;
+            let distance = Math.hypot(dx, dy);
+            const minDistance = enemy.radius + obstacle.radius + padding;
+            if (distance >= minDistance) return;
+            if (distance < 0.0001) {
+              const angle = ((enemy.id * 19.7 + obstacle.id * 3.9 + (run.time || 0) * 2.3) % (Math.PI * 2));
+              dx = Math.cos(angle);
+              dy = Math.sin(angle);
+              distance = 1;
+            }
+            const overlap = minDistance - distance;
+            enemy.x += (dx / distance) * overlap;
+            enemy.y += (dy / distance) * overlap;
+          });
+        }
+      });
+    }
+
+    isPowerupUnlocked(character, powerupId) {
+      if (!character || !powerupId) return false;
+      const unlocked = character.unlockedPickups || {};
+      return unlocked[powerupId] === true;
+    }
+
+    createInitialPowerupState(character) {
+      const magnetConfig = this.getMagnetPowerupConfig();
+      const furyConfig = this.getBattleFuryPowerupConfig();
+      const healingOrbConfig = this.getHealingOrbPowerupConfig();
+      return {
+        magnet: {
+          unlocked: this.isPowerupUnlocked(character, magnetConfig.id),
+          checkTimer: magnetConfig.drop.checkIntervalSeconds,
+          cooldownRemaining: magnetConfig.drop.firstDropDelaySeconds,
+          lastDropAt: Number.NEGATIVE_INFINITY
+        },
+        battleFury: {
+          unlocked: this.isPowerupUnlocked(character, furyConfig.id),
+          activeTimer: 0,
+          dropCooldownRemaining: furyConfig.drop.firstDropDelaySeconds
+        },
+        healingOrb: {
+          unlocked: this.isPowerupUnlocked(character, healingOrbConfig.id),
+          checkTimer: healingOrbConfig.drop.checkIntervalSeconds,
+          cooldownRemaining: healingOrbConfig.drop.firstDropDelaySeconds,
+          lastDropAt: Number.NEGATIVE_INFINITY
+        }
+      };
+    }
+
+    countActivePickupsByType(typeId) {
+      const run = this.currentRun;
+      if (!run || !run.entities || !Array.isArray(run.entities.pickups)) return 0;
+      return run.entities.pickups.reduce((count, pickup) => {
+        if (!pickup || pickup.type !== typeId) return count;
+        return count + 1;
+      }, 0);
+    }
+
+    findPowerupSpawnPositionAroundPlayer(config) {
+      const run = this.currentRun;
+      if (!run) return null;
+      const player = run.player;
+      const world = run.world;
+      const minDistance = Math.max(24, Number(config.drop.minSpawnDistanceFromPlayer || 85));
+      const maxDistance = Math.max(minDistance, Number(config.drop.maxSpawnDistanceFromPlayer || 260));
+      const edgePadding = Math.max(0, Number(config.drop.spawnEdgePadding || 24));
+
+      for (let attempt = 0; attempt < 14; attempt += 1) {
+        const angle = randRange(0, Math.PI * 2);
+        const distance = randRange(minDistance, maxDistance);
+        let x = player.x + Math.cos(angle) * distance;
+        let y = player.y + Math.sin(angle) * distance;
+        x = clamp(x, edgePadding, Math.max(edgePadding, world.width - edgePadding));
+        y = clamp(y, edgePadding, Math.max(edgePadding, world.height - edgePadding));
+        const dx = x - player.x;
+        const dy = y - player.y;
+        const finalDistance = Math.hypot(dx, dy);
+        if (finalDistance < minDistance * 0.9) continue;
+        return { x, y };
+      }
+
+      return null;
+    }
+
+    triggerMagnetEffect() {
+      const run = this.currentRun;
+      if (!run) return;
+      const magnetConfig = this.getMagnetPowerupConfig();
+      const effect = magnetConfig.effect || {};
+      const speed = Math.max(200, Number(effect.pullSpeed || 1400));
+      const duration = Math.max(0.2, Number(effect.pullDurationSeconds || 1.5));
+
+      run.entities.pickups.forEach((pickup) => {
+        if (!pickup) return;
+        if (pickup.type !== "xp" && pickup.type !== "gold") return;
+        pickup.magnetizedTimer = duration;
+        pickup.magnetizedSpeed = speed;
+      });
+    }
+
+    healPlayer(amount) {
+      const run = this.currentRun;
+      if (!run || !run.player) return;
+      const healAmount = Math.max(0, Number(amount || 0));
+      if (healAmount <= 0) return;
+      run.player.hp = Math.min(run.player.maxHp, run.player.hp + healAmount);
+    }
+
+    activateBattleFury() {
+      const run = this.currentRun;
+      if (!run || !run.powerups || !run.powerups.battleFury) return;
+      const state = run.powerups.battleFury;
+      const config = this.getBattleFuryPowerupConfig();
+      state.activeTimer = Math.max(state.activeTimer || 0, config.effect.durationSeconds);
+      this.recalculateWeaponStats(run);
+    }
+
+    updateBattleFury(dt) {
+      const run = this.currentRun;
+      if (!run || !run.powerups || !run.powerups.battleFury) return;
+      const state = run.powerups.battleFury;
+      if (state.dropCooldownRemaining > 0) {
+        state.dropCooldownRemaining = Math.max(0, state.dropCooldownRemaining - dt);
+      }
+      if (state.activeTimer <= 0) return;
+      state.activeTimer = Math.max(0, state.activeTimer - dt);
+      if (state.activeTimer <= 0) {
+        this.recalculateWeaponStats(run);
+      }
+    }
+
+    trySpawnBattleFuryPickup(enemy) {
+      const run = this.currentRun;
+      if (!run || !run.powerups || !run.powerups.battleFury) return;
+      const state = run.powerups.battleFury;
+      if (!state.unlocked) return;
+
+      const config = this.getBattleFuryPowerupConfig();
+      const drop = config.drop || {};
+      if (state.dropCooldownRemaining > 0) return;
+      if (this.countActivePickupsByType(config.id) >= drop.maxActiveOnGround) return;
+      if (Math.random() > drop.chanceOnEnemyKill) return;
+
+      const offsetX = randRange(-10, 10);
+      const offsetY = randRange(-10, 10);
+      this.spawnPickup(enemy.x + offsetX, enemy.y + offsetY, config.id, 1);
+      state.dropCooldownRemaining = drop.minSecondsBetweenDrops;
+    }
+
+    updateTimedPowerupDropState(state, config, dt) {
+      const run = this.currentRun;
+      if (!run || !state || !state.unlocked || !config) return;
+      const drop = config.drop || {};
+
+      if (state.cooldownRemaining > 0) {
+        state.cooldownRemaining = Math.max(0, state.cooldownRemaining - dt);
+      }
+      if (!Number.isFinite(state.checkTimer)) {
+        state.checkTimer = Math.max(1, Number(drop.checkIntervalSeconds || 10));
+      }
+      if (!Number.isFinite(state.lastDropAt)) {
+        state.lastDropAt = Number.NEGATIVE_INFINITY;
+      }
+
+      state.checkTimer -= dt;
+      while (state.checkTimer <= 0) {
+        state.checkTimer += Math.max(1, Number(drop.checkIntervalSeconds || 10));
+
+        if (state.cooldownRemaining > 0) continue;
+        if (this.countActivePickupsByType(config.id) >= Math.max(1, Math.floor(Number(drop.maxActiveOnGround || 1)))) {
+          continue;
+        }
+
+        const elapsedSinceLastDrop = Math.max(0, run.time - (Number.isFinite(state.lastDropAt) ? state.lastDropAt : 0));
+        const badLuckFactor = clamp(elapsedSinceLastDrop / Math.max(1, Number(drop.badLuckRampSeconds || 240)), 0, 1);
+        const chance = clamp(
+          Number(drop.baseChancePerCheck || 0.02) + Number(drop.maxBadLuckBonusChance || 0.08) * badLuckFactor,
+          0,
+          1
+        );
+        if (Math.random() > chance) continue;
+
+        const spawnPos = this.findPowerupSpawnPositionAroundPlayer(config);
+        if (!spawnPos) continue;
+        this.spawnPickup(spawnPos.x, spawnPos.y, config.id, 1);
+        state.lastDropAt = run.time;
+        state.cooldownRemaining = Math.max(0, Number(drop.minSecondsBetweenDrops || 120));
+      }
+    }
+
+    updatePowerupDrops(dt) {
+      const run = this.currentRun;
+      if (!run || !run.powerups) return;
+      this.updateTimedPowerupDropState(run.powerups.magnet, this.getMagnetPowerupConfig(), dt);
+      this.updateTimedPowerupDropState(run.powerups.healingOrb, this.getHealingOrbPowerupConfig(), dt);
+    }
+
+    getSwarmSpawnRateMultiplier(run) {
+      const swarmConfig = this.getSwarmConfig();
+      const swarmState = run && run.spawn ? run.spawn.swarm : null;
+      if (!swarmState || !swarmState.enabled) return 1;
+      if (swarmState.activeTimer <= 0) return 1;
+      const configured = Number(swarmConfig.normalSpawnRateMultiplierDuringSwarm);
+      if (Number.isNaN(configured)) return 0.2;
+      return clamp(configured, 0, 1);
+    }
+
+    chooseSwarmEventType() {
+      const swarmConfig = this.getSwarmConfig();
+      const choices = [];
+      if (swarmConfig.rush && swarmConfig.rush.enabled !== false) {
+        choices.push({ id: "rush", weight: Math.max(0.01, Number(swarmConfig.rush.weight || 1)) });
+      }
+      if (swarmConfig.encirclement && swarmConfig.encirclement.enabled !== false) {
+        choices.push({ id: "encirclement", weight: Math.max(0.01, Number(swarmConfig.encirclement.weight || 1)) });
+      }
+      if (!choices.length) return null;
+      const weights = {};
+      choices.forEach((choice) => {
+        weights[choice.id] = choice.weight;
+      });
+      return weightedChoice(weights);
+    }
+
+    buildSwarmEventPlan(run) {
+      const swarmConfig = this.getSwarmConfig();
+      const typeId = this.chooseSwarmEventType();
+      if (!typeId) return null;
+
+      const minute = run.time / 60;
+      const duration = Math.max(2.5, Number(swarmConfig.eventDurationSeconds || 6));
+      if (typeId === "rush") {
+        const rushConfig = swarmConfig.rush || {};
+        const directions = Array.isArray(rushConfig.directions) && rushConfig.directions.length
+          ? rushConfig.directions
+          : ["left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top"];
+        const direction = directions[randInt(0, directions.length - 1)];
+        const countBase = Number(rushConfig.baseEnemyCount || 10);
+        const countPerMinute = Number(rushConfig.enemyCountPerMinute || 1);
+        const maxCount = Math.max(4, Math.floor(Number(rushConfig.maxEnemyCount || 24)));
+        const targetCount = clamp(Math.floor(countBase + minute * countPerMinute), 4, maxCount);
+        const speedBase = Number(rushConfig.speedMultiplier || 1.5);
+        const speedPerMinute = Number(rushConfig.speedMultiplierPerMinute || 0.04);
+        const maxSpeed = Math.max(1, Number(rushConfig.maxSpeedMultiplier || 2.1));
+        const speedMultiplier = clamp(speedBase + minute * speedPerMinute, 1, maxSpeed);
+        const laneWidth = Math.max(60, Number(rushConfig.laneWidth || 160));
+        const spawnMargin = Math.max(40, Number(rushConfig.spawnMargin || 64));
+        const lateralJitter = Math.max(0, Number(rushConfig.lateralJitter || 10));
+        const laneCenter = direction === "left_to_right" || direction === "right_to_left"
+          ? randRange(run.world.height * 0.2, run.world.height * 0.8)
+          : randRange(run.world.width * 0.2, run.world.width * 0.8);
+
+        return {
+          id: `swarm_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+          type: "rush",
+          warningText: "Swarm Incoming: Rush",
+          activeText: "Swarm Active: Rush",
+          duration,
+          direction,
+          targetCount,
+          speedMultiplier,
+          laneWidth,
+          laneCenter,
+          spawnMargin,
+          lateralJitter,
+          enemyWeights: rushConfig.enemyWeights || { runner: 0.6, grunt: 0.3, dasher: 0.1 },
+          spawnRatePerSecond: Math.max(1, targetCount / duration),
+          spawnedCount: 0,
+          spawnAccumulator: 0
+        };
+      }
+
+      const encirclementConfig = swarmConfig.encirclement || {};
+      const countBase = Number(encirclementConfig.baseEnemyCount || 10);
+      const countPerMinute = Number(encirclementConfig.enemyCountPerMinute || 1);
+      const maxCount = Math.max(4, Math.floor(Number(encirclementConfig.maxEnemyCount || 22)));
+      const targetCount = clamp(Math.floor(countBase + minute * countPerMinute), 4, maxCount);
+      const ringRadiusBase = Number(encirclementConfig.ringRadius || 220);
+      const ringGrowth = Number(encirclementConfig.ringRadiusGrowthPerMinute || 0);
+      const ringRadius = Math.max(120, ringRadiusBase + minute * ringGrowth);
+      const brokenChance = clamp(Number(encirclementConfig.brokenRingChance || 0.5), 0, 1);
+      const brokenGap = clamp(Number(encirclementConfig.brokenRingGapRadians || 1), 0.4, Math.PI * 1.2);
+      const isBrokenRing = Math.random() < brokenChance;
+      const speedBase = Number(encirclementConfig.speedMultiplier || 1.08);
+      const speedPerMinute = Number(encirclementConfig.speedMultiplierPerMinute || 0.03);
+      const maxSpeed = Math.max(1, Number(encirclementConfig.maxSpeedMultiplier || 1.45));
+      const speedMultiplier = clamp(speedBase + minute * speedPerMinute, 1, maxSpeed);
+      return {
+        id: `swarm_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+        type: "encirclement",
+        warningText: "Swarm Incoming: Encirclement",
+        activeText: "Swarm Active: Encircled",
+        duration,
+        targetCount,
+        ringRadius,
+        isBrokenRing,
+        gapCenterAngle: randRange(0, Math.PI * 2),
+        gapRadians: brokenGap,
+        speedMultiplier,
+        enemyWeights: encirclementConfig.enemyWeights || { grunt: 0.58, runner: 0.34, dasher: 0.08 }
+      };
+    }
+
+    queueSwarmEventWarning(run) {
+      const swarmState = run.spawn.swarm;
+      const swarmConfig = this.getSwarmConfig();
+      const event = this.buildSwarmEventPlan(run);
+      if (!event) return;
+      swarmState.pendingEvent = event;
+      swarmState.warningTimer = Math.max(0.25, Number(swarmConfig.telegraphSeconds || 1));
+      swarmState.currentEvent = null;
+    }
+
+    spawnRushSwarmEnemy(event) {
+      const run = this.currentRun;
+      if (!run || !event) return;
+      const direction = String(event.direction || "left_to_right");
+      const margin = Math.max(20, Number(event.spawnMargin || 64));
+      const laneHalf = Math.max(16, Number(event.laneWidth || 160) * 0.5);
+      const jitter = Math.max(0, Number(event.lateralJitter || 10));
+      let x = 0;
+      let y = 0;
+      let vx = 0;
+      let vy = 0;
+
+      if (direction === "right_to_left") {
+        x = run.world.width + margin;
+        y = event.laneCenter + randRange(-laneHalf, laneHalf);
+        vx = -1;
+        vy = randRange(-0.07, 0.07);
+      } else if (direction === "top_to_bottom") {
+        x = event.laneCenter + randRange(-laneHalf, laneHalf);
+        y = -margin;
+        vx = randRange(-0.07, 0.07);
+        vy = 1;
+      } else if (direction === "bottom_to_top") {
+        x = event.laneCenter + randRange(-laneHalf, laneHalf);
+        y = run.world.height + margin;
+        vx = randRange(-0.07, 0.07);
+        vy = -1;
+      } else {
+        x = -margin;
+        y = event.laneCenter + randRange(-laneHalf, laneHalf);
+        vx = 1;
+        vy = randRange(-0.07, 0.07);
+      }
+
+      x += randRange(-jitter, jitter);
+      y += randRange(-jitter, jitter);
+      const speed = 1;
+      const normalized = normalizeVector(vx, vy);
+      const enemyTypeId = weightedChoice(event.enemyWeights || { runner: 0.6, grunt: 0.3, dasher: 0.1 }) || "runner";
+      this.spawnEnemy(enemyTypeId, run.time, {
+        position: { x, y },
+        velocity: { x: normalized.x * speed, y: normalized.y * speed },
+        behaviorOverride: "swarm_rush",
+        speedMultiplier: event.speedMultiplier,
+        swarmTag: "rush"
+      });
+      event.spawnedCount += 1;
+    }
+
+    updateActiveSwarmRush(dt) {
+      const run = this.currentRun;
+      if (!run) return;
+      const swarmState = run.spawn && run.spawn.swarm;
+      if (!swarmState || !swarmState.currentEvent || swarmState.currentEvent.type !== "rush") return;
+      const event = swarmState.currentEvent;
+      event.spawnAccumulator += dt * Math.max(0.25, Number(event.spawnRatePerSecond || 1));
+      while (event.spawnAccumulator >= 1 && event.spawnedCount < event.targetCount) {
+        event.spawnAccumulator -= 1;
+        this.spawnRushSwarmEnemy(event);
+      }
+    }
+
+    spawnEncirclementSwarm(event) {
+      const run = this.currentRun;
+      if (!run || !event) return;
+      const player = run.player;
+      const count = Math.max(4, Math.floor(event.targetCount || 8));
+      const step = (Math.PI * 2) / count;
+      const baseAngle = randRange(0, Math.PI * 2);
+      const gapHalf = Math.max(0, Number(event.gapRadians || 1) * 0.5);
+      let spawned = 0;
+      let attempts = 0;
+      const maxAttempts = Math.max(count * 4, 24);
+
+      while (spawned < count && attempts < maxAttempts) {
+        const angle = baseAngle + step * attempts;
+        attempts += 1;
+        if (event.isBrokenRing) {
+          const delta = Math.abs(angleBetween(angle, event.gapCenterAngle || 0));
+          if (delta <= gapHalf) continue;
+        }
+
+        const radius = Math.max(80, Number(event.ringRadius || 220));
+        const x = player.x + Math.cos(angle) * radius;
+        const y = player.y + Math.sin(angle) * radius;
+        const enemyTypeId = weightedChoice(event.enemyWeights || { grunt: 0.58, runner: 0.34, dasher: 0.08 }) || "grunt";
+        this.spawnEnemy(enemyTypeId, run.time, {
+          position: { x, y },
+          speedMultiplier: event.speedMultiplier,
+          swarmTag: "encirclement"
+        });
+        spawned += 1;
+      }
+    }
+
+    startSwarmEvent(run) {
+      const swarmState = run.spawn.swarm;
+      const event = swarmState.pendingEvent;
+      if (!event) return;
+      swarmState.pendingEvent = null;
+      swarmState.warningTimer = 0;
+      swarmState.currentEvent = event;
+      swarmState.activeTimer = Math.max(0.5, Number(event.duration || 5.5));
+      if (event.type === "encirclement") {
+        this.spawnEncirclementSwarm(event);
+      }
+    }
+
+    endSwarmEvent(run) {
+      const swarmState = run.spawn.swarm;
+      const swarmConfig = this.getSwarmConfig();
+      swarmState.currentEvent = null;
+      swarmState.activeTimer = 0;
+      swarmState.warningTimer = 0;
+      swarmState.pendingEvent = null;
+      swarmState.nextEventAt = run.time + this.rollSwarmTimeWindow(swarmConfig.intervalSeconds, 55, 80);
+    }
+
+    updateSwarmEvents(dt) {
+      const run = this.currentRun;
+      if (!run || !run.spawn || !run.spawn.swarm) return;
+      const swarmState = run.spawn.swarm;
+      if (!swarmState.enabled) return;
+
+      if (swarmState.activeTimer > 0) {
+        swarmState.activeTimer = Math.max(0, swarmState.activeTimer - dt);
+        if (swarmState.currentEvent && swarmState.currentEvent.type === "rush") {
+          this.updateActiveSwarmRush(dt);
+        }
+        if (swarmState.activeTimer <= 0) {
+          this.endSwarmEvent(run);
+        }
+        return;
+      }
+
+      if (swarmState.warningTimer > 0) {
+        swarmState.warningTimer = Math.max(0, swarmState.warningTimer - dt);
+        if (swarmState.warningTimer <= 0) {
+          this.startSwarmEvent(run);
+        }
+        return;
+      }
+
+      if (run.time >= swarmState.nextEventAt) {
+        this.queueSwarmEventWarning(run);
+      }
+    }
+
+    getLootConfig() {
+      return DATA.LOOT_SYSTEM || {};
+    }
+
+    getRunLootLevel(run) {
+      if (!run) return 1;
+      const parsed = Number(run.progressionLevel || 1);
+      if (Number.isNaN(parsed)) return 1;
+      return Math.max(1, Math.floor(parsed));
+    }
+
+    getRarityRank(rarityId) {
+      const rarities = DATA.ITEM_RARITIES || {};
+      const rarity = rarities[rarityId];
+      if (!rarity) return 0;
+      return Math.max(0, Number(rarity.rank || 0));
+    }
+
+    getMaxRarityForSource(sourceConfig, level) {
+      const maxByLevel = sourceConfig && sourceConfig.maxRarityByLevel ? sourceConfig.maxRarityByLevel : {};
+      return maxByLevel[level] || maxByLevel[1] || "purple";
+    }
+
+    getRarityWeightsForSource(sourceConfig, level) {
+      const byLevel = sourceConfig && sourceConfig.rarityWeightsByLevel ? sourceConfig.rarityWeightsByLevel : {};
+      return byLevel[level] || byLevel[1] || { grey: 1 };
+    }
+
+    chooseWeightedRarityFromMap(rarityWeights) {
+      const normalized = {};
+      Object.entries(rarityWeights || {}).forEach(([rarityId, rawWeight]) => {
+        const weight = Number(rawWeight);
+        if (Number.isNaN(weight) || weight <= 0) return;
+        normalized[rarityId] = weight;
+      });
+      const rarityId = weightedChoice(normalized);
+      if (!rarityId) return null;
+      return rarityId;
+    }
+
+    getAllowedItemTypesForDrop(run, sourceConfig, level) {
+      const lootConfig = this.getLootConfig();
+      const levelRules = lootConfig.levelRules || {};
+      const levelRule = levelRules[level] || levelRules[1] || {};
+      const fromSource = Array.isArray(sourceConfig && sourceConfig.allowedItemTypes) ? sourceConfig.allowedItemTypes : [];
+      const fromLevel = Array.isArray(levelRule.allowedItemTypes) ? levelRule.allowedItemTypes : [];
+      if (fromSource.length && fromLevel.length) {
+        return fromSource.filter((itemType) => fromLevel.includes(itemType));
+      }
+      if (fromSource.length) return fromSource.slice();
+      return fromLevel.length ? fromLevel.slice() : ["melee_weapon", "ranged_weapon", "chest"];
+    }
+
+    getEligibleLootDefinitions(run, sourceConfig, desiredRarity) {
+      const level = this.getRunLootLevel(run);
+      const classId = run.classId || "barbarian";
+      const itemDefs = Object.values(DATA.ITEM_DEFINITIONS || {});
+      const allowedTypes = this.getAllowedItemTypesForDrop(run, sourceConfig, level);
+      const maxRarity = this.getMaxRarityForSource(sourceConfig, level);
+      const maxRarityRank = this.getRarityRank(maxRarity);
+      const desiredRank = this.getRarityRank(desiredRarity);
+
+      return itemDefs.filter((definition) => {
+        if (!definition || typeof definition !== "object") return false;
+        if (allowedTypes.length && !allowedTypes.includes(definition.itemType)) return false;
+        const classIds = Array.isArray(definition.classIds) ? definition.classIds : [];
+        if (classIds.length && !classIds.includes(classId)) return false;
+
+        const definitionRarityRank = this.getRarityRank(definition.rarity);
+        if (definitionRarityRank <= 0 || definitionRarityRank > maxRarityRank) return false;
+        if (desiredRank > 0 && definitionRarityRank !== desiredRank) return false;
+
+        const dropLevelMin = Number.isNaN(Number(definition.dropLevelMin))
+          ? 1
+          : Math.max(1, Math.floor(definition.dropLevelMin));
+        const dropLevelMax = Number.isNaN(Number(definition.dropLevelMax))
+          ? 999
+          : Math.max(dropLevelMin, Math.floor(definition.dropLevelMax));
+        if (level < dropLevelMin || level > dropLevelMax) return false;
+
+        const itemLevel = Number.isNaN(Number(definition.itemLevel)) ? 1 : Math.max(1, Math.floor(definition.itemLevel));
+        return itemLevel <= Math.max(1, level);
+      });
+    }
+
+    getAllowedSlotsFromDefinition(definition) {
+      if (!definition || typeof definition !== "object") return [];
+      const raw = Array.isArray(definition.allowedSlots)
+        ? definition.allowedSlots
+        : typeof definition.allowedSlot === "string"
+        ? [definition.allowedSlot]
+        : [];
+      const unique = [];
+      raw.forEach((slot) => {
+        if (!slot || unique.includes(slot)) return;
+        unique.push(slot);
+      });
+      if (unique.length) return unique;
+      if (definition.itemType === "melee_weapon") return ["primaryMeleeWeapon", "secondaryMeleeWeapon"];
+      if (definition.itemType === "ranged_weapon") return ["rangedWeapon"];
+      if (definition.itemType === "helmet") return ["helmet"];
+      if (definition.itemType === "chest") return ["chest"];
+      if (definition.itemType === "ring") return ["ring1", "ring2"];
+      if (definition.itemType === "amulet") return ["amulet"];
+      return [];
+    }
+
+    createLootItemFromDefinition(definition, characterId) {
+      const allowedSlots = this.getAllowedSlotsFromDefinition(definition);
+      const parsedWeight = Number(definition.weaponSlotWeight);
+      const isWeapon = definition.itemType === "melee_weapon" || definition.itemType === "ranged_weapon";
+      const weaponSlotWeight = isWeapon
+        ? Number.isNaN(parsedWeight)
+          ? 1
+          : Math.max(1, Math.min(2, Math.floor(parsedWeight)))
+        : null;
+      const stats = definition.stats && typeof definition.stats === "object" ? { ...definition.stats } : {};
+      return {
+        instanceId: `loot_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+        templateId: definition.id,
+        name: definition.name || "Item",
+        rarity: definition.rarity,
+        itemType: definition.itemType,
+        itemCategory: definition.itemCategory || null,
+        weaponCategory: definition.weaponCategory || null,
+        physicalDamageType: definition.physicalDamageType || null,
+        allowedSlots,
+        allowedSlot: allowedSlots[0] || null,
+        weaponSlotWeight,
+        itemLevel: definition.itemLevel || 1,
+        stats,
+        ownerCharacterId: characterId || null
+      };
+    }
+
+    rollLootDropCount(sourceConfig) {
+      const minimum = Math.max(0, Math.floor(Number(sourceConfig && sourceConfig.minDrops) || 0));
+      const extraChances = Array.isArray(sourceConfig && sourceConfig.extraDropChances)
+        ? sourceConfig.extraDropChances
+        : [];
+      let count = minimum;
+      for (let i = 0; i < extraChances.length; i += 1) {
+        const chance = clamp(Number(extraChances[i] || 0), 0, 1);
+        if (Math.random() <= chance) {
+          count += 1;
+        }
+      }
+      return count;
+    }
+
+    generateLootItemsForSource(sourceId, enemy) {
+      const run = this.currentRun;
+      const lootConfig = this.getLootConfig();
+      if (!lootConfig || lootConfig.enabled === false) return [];
+      const sourceConfig = lootConfig.sources && lootConfig.sources[sourceId];
+      if (!sourceConfig || sourceConfig.enabled === false) return [];
+
+      const level = this.getRunLootLevel(run);
+      const dropCount = this.rollLootDropCount(sourceConfig);
+      if (dropCount <= 0) return [];
+
+      const items = [];
+      const rarityWeights = this.getRarityWeightsForSource(sourceConfig, level);
+      const maxRarityRank = this.getRarityRank(this.getMaxRarityForSource(sourceConfig, level));
+
+      for (let i = 0; i < dropCount; i += 1) {
+        let rarity = this.chooseWeightedRarityFromMap(rarityWeights);
+        if (!rarity || this.getRarityRank(rarity) > maxRarityRank) {
+          rarity = "grey";
+        }
+
+        let candidates = this.getEligibleLootDefinitions(run, sourceConfig, rarity);
+        if (!candidates.length) {
+          candidates = this.getEligibleLootDefinitions(run, sourceConfig, null);
+        }
+        if (!candidates.length) continue;
+        const definition = candidates[randInt(0, candidates.length - 1)];
+        const item = this.createLootItemFromDefinition(definition, run.characterId);
+        items.push(item);
+      }
+
+      return items;
+    }
+
+    spawnBossLootDrops(sourceId, enemy) {
+      const run = this.currentRun;
+      if (!run || !enemy) return;
+      const items = this.generateLootItemsForSource(sourceId, enemy);
+      if (!items.length) return;
+
+      items.forEach((item, index) => {
+        const angle = (Math.PI * 2 * index) / Math.max(1, items.length);
+        const spread = 12 + index * 3;
+        const x = enemy.x + Math.cos(angle) * spread + randRange(-5, 5);
+        const y = enemy.y + Math.sin(angle) * spread + randRange(-5, 5);
+        this.spawnPickup(x, y, "item", 1, { item, rarity: item.rarity });
+      });
+    }
+
+    startVictoryCollectionWindow() {
+      const run = this.currentRun;
+      if (!run) return;
+      run.victoryCountdownRemaining = 4.5;
+      run.entities.enemies = [];
+      run.entities.enemyProjectiles = [];
+      if (run.spawn && run.spawn.swarm) {
+        run.spawn.swarm.activeTimer = 0;
+        run.spawn.swarm.warningTimer = 0;
       }
     }
 
@@ -282,8 +1442,18 @@
         characterId: character.id,
         characterName: character.name,
         classId: character.classId,
+        progressionLevel: Math.max(1, Math.floor(Number(character.progressionLevel || 1))),
+        attributes: {
+          strength: Number((character.attributeLevels && character.attributeLevels.strength) || 0),
+          ferocity: Number((character.attributeLevels && character.attributeLevels.ferocity) || 0),
+          endurance: Number((character.attributeLevels && character.attributeLevels.endurance) || 0),
+          instinct: Number((character.attributeLevels && character.attributeLevels.instinct) || 0)
+        },
+        attributeEffects: null,
         world: { width, height },
+        worldOffset: { x: 0, y: 0 },
         time: 0,
+        victoryCountdownRemaining: 0,
         ended: false,
         pauseReason: null,
         reasonEnded: null,
@@ -291,12 +1461,27 @@
           x: width * 0.5,
           y: height * 0.5,
           radius: playerBase.radius,
+          baseMoveSpeed: playerBase.moveSpeed,
           moveSpeed: playerBase.moveSpeed,
+          baseMaxHp: playerBase.maxHp,
           maxHp: playerBase.maxHp,
           hp: playerBase.maxHp,
           invulnTimer: 0,
+          defenseStackCount: 0,
+          defenseStackTimer: 0,
+          speedBoostTimer: 0,
+          basePickupRadius: playerBase.pickupRadius,
           pickupRadius: playerBase.pickupRadius,
           facing: 0,
+          rage: {
+            value: 0,
+            max: 100,
+            active: false,
+            timeLeft: 0,
+            baseDuration: 6,
+            gainOnHit: 5,
+            gainOnKill: 20
+          },
           axe: {
             baseDamage: axeData.baseDamage,
             baseCooldown: axeData.cooldown,
@@ -318,6 +1503,8 @@
             baseRange: javelinData.range,
             baseCount: javelinData.count,
             basePierce: javelinData.pierce,
+            baseExplosiveRadius: Math.max(12, Number(javelinData.explosiveRadius || 54)),
+            baseExplosiveDamageMultiplier: clamp(Number(javelinData.explosiveDamageMultiplier || 0.45), 0, 3),
             damage: javelinData.baseDamage,
             cooldown: javelinData.cooldown,
             cooldownLeft: 0.5,
@@ -327,7 +1514,10 @@
             lifetime: javelinData.lifetime,
             count: javelinData.count,
             pierce: javelinData.pierce,
-            piercingVolleyActive: false
+            piercingVolleyActive: false,
+            explosiveVolleyActive: false,
+            explosiveRadius: 0,
+            explosiveDamageMultiplier: 0
           }
         },
         progression: {
@@ -344,24 +1534,31 @@
         spawn: {
           accumulator: 0,
           nextMinibossTime: DATA.RUN.minibossIntervalSeconds,
-          finalBossSpawned: false
+          finalBossSpawned: false,
+          swarm: this.createInitialSwarmState()
         },
+        powerups: this.createInitialPowerupState(character),
         entities: {
           enemies: [],
           playerProjectiles: [],
           enemyProjectiles: [],
           pickups: [],
+          obstacles: [],
           attackEffects: []
         },
         stats: {
           enemiesKilled: 0,
           goldEarned: 0,
+          goldPickupCarry: 0,
           legacyXpEarned: 0,
           minibossesDefeated: 0,
           finalBossAppeared: false,
           finalBossDefeated: false
         }
       };
+      runState.entities.obstacles = this.createRunObstacles(runState.world, runState.player);
+      runState.attributeEffects = this.calculateAttributeEffects(runState.attributes);
+      this.applyAttributeBaseStats(runState);
       this.recalculateWeaponStats(runState);
       return runState;
     }
@@ -378,6 +1575,7 @@
       this.ui.hideLevelUp();
       this.ui.hideEndRun();
       this.handleResize();
+      this.centerPlayerInWorld();
     }
 
     restartRun() {
@@ -390,6 +1588,14 @@
       this.ui.hideLevelUp();
       this.ui.hideEndRun();
       this.handleResize();
+      this.centerPlayerInWorld();
+    }
+
+    centerPlayerInWorld() {
+      const run = this.currentRun;
+      if (!run) return;
+      run.player.x = run.world.width * 0.5;
+      run.player.y = run.world.height * 0.5;
     }
 
     returnHome() {
@@ -431,12 +1637,29 @@
       const run = this.currentRun;
       run.time += dt;
 
+      if (run.victoryCountdownRemaining > 0) {
+        run.victoryCountdownRemaining = Math.max(0, run.victoryCountdownRemaining - dt);
+        this.updatePlayerFacing();
+        this.updatePlayerMovement(dt);
+        this.updatePlayerInvulnerability(dt);
+        this.updatePickups(dt);
+        this.updateAttackEffects(dt);
+        if (run.victoryCountdownRemaining <= 0) {
+          this.finishRun("victory");
+        }
+        return;
+      }
+
       this.updatePlayerFacing();
       this.updatePlayerMovement(dt);
       this.updatePlayerInvulnerability(dt);
+      this.updateRage(dt);
+      this.updateBattleFury(dt);
       this.updateAxe(dt);
       this.updateJavelin(dt);
+      this.updateSwarmEvents(dt);
       this.updateSpawns(dt);
+      this.updatePowerupDrops(dt);
       this.updateEnemies(dt);
       this.updatePlayerProjectiles(dt);
       this.updateEnemyProjectiles(dt);
@@ -461,6 +1684,10 @@
       const run = this.currentRun;
       const player = run.player;
       const keys = this.input.keys;
+      const effects = run.attributeEffects || this.calculateAttributeEffects(run.attributes);
+      const speedBoostMultiplier = player.speedBoostTimer > 0 ? effects.damageTakenSpeedBoostPct : 0;
+      const rageMoveBonus = player.rage && player.rage.active && effects.rageAttackModifierUnlocked ? 0.06 : 0;
+      player.moveSpeed = player.baseMoveSpeed * (1 + effects.moveSpeedBonusPct + speedBoostMultiplier + rageMoveBonus);
       const axisX = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
       const axisY = (keys.KeyS ? 1 : 0) - (keys.KeyW ? 1 : 0);
 
@@ -472,16 +1699,57 @@
         moveY = normalized.y;
       }
 
-      player.x += moveX * player.moveSpeed * dt;
-      player.y += moveY * player.moveSpeed * dt;
-      player.x = clamp(player.x, player.radius, run.world.width - player.radius);
-      player.y = clamp(player.y, player.radius, run.world.height - player.radius);
+      const travelX = moveX * player.moveSpeed * dt;
+      const travelY = moveY * player.moveSpeed * dt;
+      if (travelX !== 0 || travelY !== 0) {
+        // Player stays camera-centered while the world scrolls in the opposite direction.
+        const appliedShift = this.applyWorldShiftWithObstacleCollision(-travelX, -travelY);
+        run.worldOffset.x += -appliedShift.x;
+        run.worldOffset.y += -appliedShift.y;
+      }
+
+      this.centerPlayerInWorld();
+    }
+
+    applyWorldShift(shiftX, shiftY) {
+      const run = this.currentRun;
+      if (!run) return;
+
+      run.entities.enemies.forEach((enemy) => {
+        enemy.x += shiftX;
+        enemy.y += shiftY;
+      });
+      run.entities.playerProjectiles.forEach((projectile) => {
+        projectile.x += shiftX;
+        projectile.y += shiftY;
+      });
+      run.entities.enemyProjectiles.forEach((projectile) => {
+        projectile.x += shiftX;
+        projectile.y += shiftY;
+      });
+      run.entities.pickups.forEach((pickup) => {
+        pickup.x += shiftX;
+        pickup.y += shiftY;
+      });
+      run.entities.obstacles.forEach((obstacle) => {
+        obstacle.x += shiftX;
+        obstacle.y += shiftY;
+      });
     }
 
     updatePlayerInvulnerability(dt) {
       const player = this.currentRun.player;
       if (player.invulnTimer > 0) {
         player.invulnTimer = Math.max(0, player.invulnTimer - dt);
+      }
+      if (player.speedBoostTimer > 0) {
+        player.speedBoostTimer = Math.max(0, player.speedBoostTimer - dt);
+      }
+      if (player.defenseStackTimer > 0) {
+        player.defenseStackTimer = Math.max(0, player.defenseStackTimer - dt);
+        if (player.defenseStackTimer <= 0) {
+          player.defenseStackCount = 0;
+        }
       }
     }
 
@@ -579,16 +1847,44 @@
           damage: javelin.damage,
           life: javelin.lifetime,
           remainingHits: 1 + Math.max(0, Math.floor(javelin.pierce)),
-          hitMap: {}
+          hitMap: {},
+          explosiveVolleyActive: Boolean(javelin.explosiveVolleyActive),
+          explosiveRadius: Math.max(0, Number(javelin.explosiveRadius || 0)),
+          explosiveDamageMultiplier: Math.max(0, Number(javelin.explosiveDamageMultiplier || 0))
         });
       }
+    }
+
+    applyJavelinSplashDamage(centerX, centerY, radius, damage, primaryEnemyId) {
+      const run = this.currentRun;
+      if (!run || !Array.isArray(run.entities.enemies)) return;
+      const splashRadius = Math.max(0, Number(radius || 0));
+      const splashDamage = Math.max(0, Number(damage || 0));
+      if (splashRadius <= 0 || splashDamage <= 0) return;
+      const splashSq = splashRadius * splashRadius;
+
+      run.entities.enemies.forEach((enemy) => {
+        if (!enemy || enemy.dead) return;
+        if (enemy.id === primaryEnemyId) return;
+        const dx = enemy.x - centerX;
+        const dy = enemy.y - centerY;
+        if (dx * dx + dy * dy > splashSq) return;
+        this.damageEnemy(enemy, splashDamage);
+      });
     }
 
     updateSpawns(dt) {
       const run = this.currentRun;
       const phase = getSpawnTableForTime(run.time);
       const minute = run.time / 60;
-      const spawnRate = DATA.RUN.baseSpawnRatePerSecond * phase.spawnRateMultiplier * (1 + minute * 0.04);
+      const swarmSpawnRateMultiplier = this.getSwarmSpawnRateMultiplier(run);
+      if (swarmSpawnRateMultiplier <= 0) {
+        run.spawn.accumulator = Math.min(run.spawn.accumulator, 0.25);
+        return;
+      }
+
+      const spawnRate =
+        DATA.RUN.baseSpawnRatePerSecond * phase.spawnRateMultiplier * (1 + minute * 0.04) * swarmSpawnRateMultiplier;
       const spawnInterval = 1 / Math.max(0.01, spawnRate);
       run.spawn.accumulator += dt;
 
@@ -633,6 +1929,7 @@
       const minute = timeSeconds / 60;
       const healthScale = 1 + minute * DATA.RUN.healthScalingPerMinute;
       const damageScale = 1 + minute * DATA.RUN.damageScalingPerMinute;
+      const xpScale = 1 + minute * Number((DATA.RUN && DATA.RUN.xpScalingPerMinute) || 0);
 
       const margin = 48;
       const side = randInt(0, 3);
@@ -657,19 +1954,68 @@
         y = randRange(definition.radius + 20, world.height - definition.radius - 20);
       }
 
+      if (options && options.position) {
+        const parsedX = Number(options.position.x);
+        const parsedY = Number(options.position.y);
+        if (!Number.isNaN(parsedX)) x = parsedX;
+        if (!Number.isNaN(parsedY)) y = parsedY;
+      }
+
+      const obstacles = (run.entities && run.entities.obstacles) || [];
+      if (obstacles.length) {
+        const obstacleConfig = this.getObstacleConfig();
+        const obstaclePadding = obstacleConfig.enemyCollisionPadding;
+        if (this.isCircleOverlappingAnyObstacle(x, y, definition.radius, obstacles, obstaclePadding)) {
+          for (let attempt = 0; attempt < 14; attempt += 1) {
+            const candidateX =
+              options && options.forceInside
+                ? randRange(definition.radius + 20, world.width - definition.radius - 20)
+                : randRange(-margin, world.width + margin);
+            const candidateY =
+              options && options.forceInside
+                ? randRange(definition.radius + 20, world.height - definition.radius - 20)
+                : randRange(-margin, world.height + margin);
+            if (!this.isCircleOverlappingAnyObstacle(candidateX, candidateY, definition.radius, obstacles, obstaclePadding)) {
+              x = candidateX;
+              y = candidateY;
+              break;
+            }
+          }
+        }
+      }
+
+      const behavior = options && options.behaviorOverride ? options.behaviorOverride : definition.behavior;
+      const speedMultiplier = options && !Number.isNaN(Number(options.speedMultiplier))
+        ? Math.max(0.2, Number(options.speedMultiplier))
+        : 1;
+      const healthMultiplier = options && !Number.isNaN(Number(options.healthMultiplier))
+        ? Math.max(0.25, Number(options.healthMultiplier))
+        : 1;
+      const damageMultiplier = options && !Number.isNaN(Number(options.damageMultiplier))
+        ? Math.max(0.25, Number(options.damageMultiplier))
+        : 1;
+
+      const velocityX = options && options.velocity && !Number.isNaN(Number(options.velocity.x))
+        ? Number(options.velocity.x)
+        : 0;
+      const velocityY = options && options.velocity && !Number.isNaN(Number(options.velocity.y))
+        ? Number(options.velocity.y)
+        : 0;
+      const hasVelocity = Math.abs(velocityX) > 0.0001 || Math.abs(velocityY) > 0.0001;
+
       const enemy = {
         id: this.nextEntityId(),
         typeId: definition.id,
-        behavior: definition.behavior,
+        behavior,
         color: definition.color,
         x,
         y,
         radius: definition.radius,
-        maxHp: Math.floor(definition.hp * healthScale),
-        hp: Math.floor(definition.hp * healthScale),
-        damage: Math.ceil(definition.damage * damageScale),
-        speed: definition.speed,
-        xpDrop: definition.xpDrop,
+        maxHp: Math.floor(definition.hp * healthScale * healthMultiplier),
+        hp: Math.floor(definition.hp * healthScale * healthMultiplier),
+        damage: Math.ceil(definition.damage * damageScale * damageMultiplier),
+        speed: definition.speed * speedMultiplier,
+        xpDrop: Math.max(1, Math.floor(definition.xpDrop * xpScale)),
         goldChance: definition.goldChance,
         goldDrop: definition.goldDrop,
         shotTimer: randRange(0.3, definition.shotCooldown || 0.8),
@@ -678,6 +2024,9 @@
         dashTimeLeft: 0,
         dashDirX: 0,
         dashDirY: 0,
+        rushVX: hasVelocity ? velocityX : 0,
+        rushVY: hasVelocity ? velocityY : 0,
+        swarmTag: (options && options.swarmTag) || null,
         dead: false
       };
 
@@ -709,7 +2058,10 @@
         const dirX = dx / distance;
         const dirY = dy / distance;
 
-        if (enemy.behavior === "chaser" || enemy.behavior === "fast") {
+        if (enemy.behavior === "swarm_rush") {
+          enemy.x += enemy.rushVX * enemy.speed * dt;
+          enemy.y += enemy.rushVY * enemy.speed * dt;
+        } else if (enemy.behavior === "chaser" || enemy.behavior === "fast") {
           enemy.x += dirX * enemy.speed * dt;
           enemy.y += dirY * enemy.speed * dt;
         } else if (enemy.behavior === "ranged") {
@@ -772,13 +2124,102 @@
           }
         }
 
-        if (distance <= enemy.radius + player.radius && enemy.contactTimer <= 0) {
+        if (enemy.behavior === "swarm_rush") {
+          const despawnMargin = 140;
+          const offscreen =
+            enemy.x < -despawnMargin ||
+            enemy.y < -despawnMargin ||
+            enemy.x > run.world.width + despawnMargin ||
+            enemy.y > run.world.height + despawnMargin;
+          if (offscreen) {
+            enemy.dead = true;
+          }
+        }
+      });
+
+      this.resolveEnemyObstacleCollisions(enemies);
+      this.resolveEnemySeparation(enemies, dt);
+      this.resolveEnemyObstacleCollisions(enemies);
+
+      enemies.forEach((enemy) => {
+        if (enemy.dead) return;
+        const playerDx = player.x - enemy.x;
+        const playerDy = player.y - enemy.y;
+        const playerDistance = Math.hypot(playerDx, playerDy) || 0.001;
+        if (playerDistance <= enemy.radius + player.radius && enemy.contactTimer <= 0) {
           enemy.contactTimer = 0.55;
           this.damagePlayer(enemy.damage);
         }
       });
 
       run.entities.enemies = enemies.filter((enemy) => !enemy.dead);
+    }
+
+    getEnemyCollisionSettings(enemyTypeId) {
+      const collisionData = DATA.ENEMY_COLLISION || {};
+      const byType = collisionData.typeSettings || {};
+      const raw = byType[enemyTypeId] || {};
+      return {
+        mass: Math.max(0.2, Number(raw.mass || 1)),
+        collisionScale: clamp(Number(raw.collisionScale || 1), 0.55, 1.5)
+      };
+    }
+
+    resolveEnemySeparation(enemies, dt) {
+      const collisionData = DATA.ENEMY_COLLISION || {};
+      const separationStrength = Math.max(0, Number(collisionData.separationStrength || 0));
+      const personalSpaceBuffer = Math.max(0, Number(collisionData.personalSpaceBuffer || 0));
+      const maxCorrectionPerFrame = Math.max(0, Number(collisionData.maxCorrectionPerFrame || 8));
+      if (separationStrength <= 0 || maxCorrectionPerFrame <= 0) return;
+
+      const frameScale = clamp(dt * 60, 0.55, 1.85);
+      for (let i = 0; i < enemies.length; i += 1) {
+        const a = enemies[i];
+        if (!a || a.dead) continue;
+        const settingsA = this.getEnemyCollisionSettings(a.typeId);
+        const radiusA = a.radius * settingsA.collisionScale;
+
+        for (let j = i + 1; j < enemies.length; j += 1) {
+          const b = enemies[j];
+          if (!b || b.dead) continue;
+
+          const settingsB = this.getEnemyCollisionSettings(b.typeId);
+          const radiusB = b.radius * settingsB.collisionScale;
+          const desiredDistance = radiusA + radiusB + personalSpaceBuffer;
+
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let distance = Math.hypot(dx, dy);
+
+          if (distance <= 0.0001) {
+            const angle = (a.id * 13.37 + b.id * 7.11 + (this.currentRun ? this.currentRun.time : 0) * 2.7) % (Math.PI * 2);
+            dx = Math.cos(angle);
+            dy = Math.sin(angle);
+            distance = 1;
+          }
+
+          if (distance >= desiredDistance) continue;
+          const overlap = desiredDistance - distance;
+          if (overlap <= 0) continue;
+
+          const correction = Math.min(maxCorrectionPerFrame, overlap * separationStrength * frameScale);
+          const nx = dx / distance;
+          const ny = dy / distance;
+
+          const invMassA = 1 / settingsA.mass;
+          const invMassB = 1 / settingsB.mass;
+          const invMassTotal = invMassA + invMassB;
+          if (invMassTotal <= 0.0001) continue;
+
+          const moveA = correction * (invMassA / invMassTotal);
+          const moveB = correction * (invMassB / invMassTotal);
+
+          a.x -= nx * moveA;
+          a.y -= ny * moveA;
+          b.x += nx * moveB;
+          b.y += ny * moveB;
+        }
+      }
     }
 
     spawnEnemyProjectile(sourceEnemy, player, speed, damage) {
@@ -843,6 +2284,19 @@
           if (dx * dx + dy * dy > range * range) continue;
           projectile.hitMap[enemy.id] = true;
           this.damageEnemy(enemy, projectile.damage);
+          if (
+            projectile.explosiveVolleyActive &&
+            projectile.explosiveRadius > 0 &&
+            projectile.explosiveDamageMultiplier > 0
+          ) {
+            this.applyJavelinSplashDamage(
+              projectile.x,
+              projectile.y,
+              projectile.explosiveRadius,
+              projectile.damage * projectile.explosiveDamageMultiplier,
+              enemy.id
+            );
+          }
           projectile.remainingHits -= 1;
           if (projectile.remainingHits <= 0) {
             consumed = true;
@@ -892,24 +2346,74 @@
     updatePickups(dt) {
       const run = this.currentRun;
       const player = run.player;
+      const magnetConfig = this.getMagnetPowerupConfig();
+      const battleFuryConfig = this.getBattleFuryPowerupConfig();
+      const healingOrbConfig = this.getHealingOrbPowerupConfig();
       const kept = [];
 
       run.entities.pickups.forEach((pickup) => {
+        if (pickup.type === "item" && pickup.blockedTimer > 0) {
+          pickup.blockedTimer = Math.max(0, pickup.blockedTimer - dt);
+        }
+
         const dx = player.x - pickup.x;
         const dy = player.y - pickup.y;
         const distance = Math.hypot(dx, dy) || 0.001;
-        const pullRange = player.pickupRadius * 2.1;
-        if (distance <= pullRange) {
-          const strength = clamp(1 - distance / pullRange, 0, 1);
-          pickup.x += (dx / distance) * (40 + 200 * strength) * dt;
-          pickup.y += (dy / distance) * (40 + 200 * strength) * dt;
+        const isXpPickup = pickup.type === "xp";
+        const isGoldPickup = pickup.type === "gold";
+        const isMagnetizablePickup = isXpPickup || isGoldPickup;
+        const hasMagnetizedPull = isMagnetizablePickup && Number(pickup.magnetizedTimer || 0) > 0;
+        if (hasMagnetizedPull) {
+          pickup.magnetizedTimer = Math.max(0, Number(pickup.magnetizedTimer || 0) - dt);
+          const magnetizedSpeed = Math.max(
+            200,
+            Number(pickup.magnetizedSpeed || magnetConfig.effect.pullSpeed || 1400)
+          );
+          pickup.x += (dx / distance) * magnetizedSpeed * dt;
+          pickup.y += (dy / distance) * magnetizedSpeed * dt;
         }
 
-        if (distance <= player.pickupRadius + pickup.radius) {
+        const pullRange = player.pickupRadius * (isXpPickup ? 2.8 : 2.1);
+        if (!hasMagnetizedPull && distance <= pullRange) {
+          const strength = clamp(1 - distance / pullRange, 0, 1);
+          const speed = isXpPickup
+            ? 120 + 680 * Math.pow(strength, 2)
+            : 40 + 200 * strength;
+          pickup.x += (dx / distance) * speed * dt;
+          pickup.y += (dy / distance) * speed * dt;
+
+          // Snap nearby XP to the player so it gets absorbed immediately.
+          if (isMagnetizablePickup && distance <= player.pickupRadius * 0.65) {
+            pickup.x = player.x;
+            pickup.y = player.y;
+          }
+        }
+
+        const postDx = player.x - pickup.x;
+        const postDy = player.y - pickup.y;
+        const postDistance = Math.hypot(postDx, postDy);
+        if (postDistance <= player.pickupRadius + pickup.radius) {
           if (pickup.type === "xp") {
             this.gainXp(pickup.value);
           } else if (pickup.type === "gold") {
-            run.stats.goldEarned += pickup.value;
+            run.stats.goldEarned += this.calculateScaledGoldPickup(pickup.value);
+          } else if (pickup.type === magnetConfig.id) {
+            this.triggerMagnetEffect();
+          } else if (pickup.type === battleFuryConfig.id) {
+            this.activateBattleFury();
+          } else if (pickup.type === healingOrbConfig.id) {
+            this.healPlayer(healingOrbConfig.effect.healAmount);
+          } else if (pickup.type === "item") {
+            if (pickup.blockedTimer > 0) {
+              kept.push(pickup);
+              return;
+            }
+            const storeResult = SAVE.storeItemInStorage(run.characterId, pickup.item);
+            if (!storeResult || !storeResult.ok) {
+              pickup.blockedTimer = 0.5;
+              kept.push(pickup);
+              return;
+            }
           }
           return;
         }
@@ -1063,12 +2567,123 @@
       this.maybeOpenLevelUp();
     }
 
+    calculateAttributeEffects(attributeLevels) {
+      const levels = attributeLevels || {};
+      const strength = Math.max(0, Math.floor(Number(levels.strength || 0)));
+      const ferocity = Math.max(0, Math.floor(Number(levels.ferocity || 0)));
+      const endurance = Math.max(0, Math.floor(Number(levels.endurance || 0)));
+      const instinct = Math.max(0, Math.floor(Number(levels.instinct || 0)));
+
+      return {
+        strength,
+        ferocity,
+        endurance,
+        instinct,
+        physicalDamageMultiplier: 1 + strength * 0.03,
+        armoredBonusDamagePct: strength >= 3 ? 0.08 : 0,
+        armorIgnorePct: strength >= 6 ? 0.15 : 0,
+        armorBypassPct: strength >= 10 ? 0.3 : 0,
+        rageGainMultiplier: 1 + ferocity * 0.08,
+        rageDurationMultiplier: 1 + ferocity * 0.06,
+        rageAttackSpeedBonusPct: ferocity >= 3 ? 0.08 + ferocity * 0.01 : 0,
+        killExtendsRageSeconds: ferocity >= 6 ? 0.8 + ferocity * 0.08 : 0,
+        rageAttackModifierUnlocked: ferocity >= 10,
+        maxHpMultiplier: 1 + endurance * 0.05,
+        baseDamageReductionPct: Math.min(0.35, endurance * 0.01),
+        lowHpDamageReductionPct: endurance >= 3 ? 0.08 : 0,
+        repeatedHitStackReductionPct: endurance >= 6 ? 0.015 : 0,
+        repeatedHitMaxStacks: endurance >= 6 ? 5 : 0,
+        damageToRagePct: endurance >= 10 ? 0.35 : 0,
+        moveSpeedBonusPct: instinct * 0.03,
+        cooldownReductionPct: Math.min(0.35, instinct * 0.015),
+        pickupRadiusBonusPct: instinct * 0.04,
+        killCooldownRecoveryPct: instinct >= 3 ? 0.04 : 0,
+        damageTakenSpeedBoostPct: instinct >= 6 ? 0.18 : 0,
+        damageTakenSpeedBoostDuration: instinct >= 6 ? 2.2 : 0,
+        autoTriggerRageLowHp: instinct >= 10
+      };
+    }
+
+    applyAttributeBaseStats(run) {
+      if (!run) return;
+      run.attributeEffects = this.calculateAttributeEffects(run.attributes);
+      const effects = run.attributeEffects;
+      const player = run.player;
+      const hpRatio = player.maxHp > 0 ? player.hp / player.maxHp : 1;
+      const nextMaxHp = Math.max(1, player.baseMaxHp * effects.maxHpMultiplier);
+      player.maxHp = nextMaxHp;
+      player.hp = Math.max(0, Math.min(nextMaxHp, nextMaxHp * hpRatio));
+      player.pickupRadius = player.basePickupRadius * (1 + effects.pickupRadiusBonusPct);
+    }
+
+    gainRage(run, rawAmount) {
+      if (!run || !run.player || !run.player.rage) return;
+      const rage = run.player.rage;
+      const amount = Math.max(0, Number(rawAmount || 0));
+      if (amount <= 0) return;
+      rage.value = clamp(rage.value + amount, 0, rage.max);
+      if (!rage.active && rage.value >= rage.max) {
+        this.activateRage(run, 0);
+      }
+    }
+
+    activateRage(run, bonusDurationSeconds) {
+      if (!run || !run.player || !run.player.rage) return;
+      const rage = run.player.rage;
+      const effects = run.attributeEffects || this.calculateAttributeEffects(run.attributes);
+      rage.active = true;
+      rage.value = 0;
+      rage.timeLeft = Math.max(
+        rage.timeLeft,
+        rage.baseDuration * effects.rageDurationMultiplier + Math.max(0, bonusDurationSeconds || 0)
+      );
+      this.recalculateWeaponStats(run);
+    }
+
+    updateRage(dt) {
+      const run = this.currentRun;
+      if (!run || !run.player || !run.player.rage) return;
+      const rage = run.player.rage;
+      if (!rage.active) return;
+      rage.timeLeft = Math.max(0, rage.timeLeft - dt);
+      if (rage.timeLeft <= 0) {
+        rage.active = false;
+        this.recalculateWeaponStats(run);
+      }
+    }
+
+    isEnemyArmored(enemy) {
+      if (!enemy) return false;
+      return enemy.typeId === "dasher" || enemy.typeId === "miniboss" || enemy.typeId === "finalBoss";
+    }
+
+    getEnemyArmorRatio(enemy) {
+      if (!enemy) return 0;
+      if (enemy.typeId === "finalBoss") return 0.3;
+      if (enemy.typeId === "miniboss") return 0.18;
+      if (enemy.typeId === "dasher") return 0.1;
+      return 0;
+    }
+
     recalculateWeaponStats(run) {
       const player = run.player;
+      this.applyAttributeBaseStats(run);
+      const effects = run.attributeEffects || this.calculateAttributeEffects(run.attributes);
       const genericDamageRank = this.getUpgradeRankForRun(run, "generic_damage");
       const genericCooldownRank = this.getUpgradeRankForRun(run, "generic_cooldown");
-      const damageMultiplier = 1 + genericDamageRank * 0.11;
-      const cooldownMultiplier = Math.max(0.55, 1 - genericCooldownRank * 0.06);
+      const furyConfig = this.getBattleFuryPowerupConfig();
+      const furyState = run.powerups && run.powerups.battleFury ? run.powerups.battleFury : null;
+      const furyActive = Boolean(furyState && Number(furyState.activeTimer || 0) > 0);
+      const furyDamageMultiplier = furyActive ? Math.max(1, furyConfig.effect.damageMultiplier) : 1;
+      const furyAttackSpeedMultiplier = furyActive ? Math.max(1, furyConfig.effect.attackSpeedMultiplier) : 1;
+
+      const damageMultiplier = (1 + genericDamageRank * 0.11) * effects.physicalDamageMultiplier * furyDamageMultiplier;
+      const rageAttackSpeedMultiplier =
+        player.rage && player.rage.active ? 1 + Math.max(0, effects.rageAttackSpeedBonusPct) : 1;
+      const cooldownMultiplier = Math.max(
+        0.45,
+        (1 - genericCooldownRank * 0.06) * (1 - effects.cooldownReductionPct) / (rageAttackSpeedMultiplier * furyAttackSpeedMultiplier)
+      );
 
       const axeArcRank = this.getUpgradeRankForRun(run, "axe_widen_arc");
       const axeTwinRank = this.getUpgradeRankForRun(run, "axe_twin_swing");
@@ -1076,25 +2691,34 @@
 
       player.axe.damage = player.axe.baseDamage * damageMultiplier * (axeWhirlwind ? 1.2 : 1);
       player.axe.cooldown = Math.max(0.14, player.axe.baseCooldown * cooldownMultiplier);
-      player.axe.range = player.axe.baseRange * (1 + axeArcRank * 0.08 + (axeWhirlwind ? 0.12 : 0));
+      player.axe.range =
+        player.axe.baseRange *
+        (1 + axeArcRank * 0.08 + (axeWhirlwind ? 0.12 : 0) + (player.rage && player.rage.active && effects.rageAttackModifierUnlocked ? 0.12 : 0));
       player.axe.arcRadians = axeWhirlwind
         ? Math.PI * 2
         : Math.min(Math.PI * 1.9, player.axe.baseArcRadians * (1 + axeArcRank * 0.17));
-      player.axe.extraSwings = axeTwinRank;
+      player.axe.extraSwings = axeTwinRank + (player.rage && player.rage.active && effects.rageAttackModifierUnlocked ? 1 : 0);
       player.axe.whirlwindActive = axeWhirlwind;
 
       const javelinVolleyRank = this.getUpgradeRankForRun(run, "javelin_volley");
-      const javelinLongFlightRank = this.getUpgradeRankForRun(run, "javelin_long_flight");
+      const javelinPierceRank = this.getUpgradeRankForRun(run, "javelin_long_flight");
       const javelinUltimate = this.getUpgradeRankForRun(run, "javelin_piercing_volley") > 0;
 
-      player.javelin.damage = player.javelin.baseDamage * damageMultiplier * (javelinUltimate ? 1.12 : 1);
+      player.javelin.damage = player.javelin.baseDamage * damageMultiplier * (javelinUltimate ? 1.1 : 1);
       player.javelin.cooldown = Math.max(0.1, player.javelin.baseCooldown * cooldownMultiplier);
-      player.javelin.speed = player.javelin.baseSpeed * (1 + javelinLongFlightRank * 0.12);
-      player.javelin.range =
-        player.javelin.baseRange * (1 + javelinLongFlightRank * 0.1 + (javelinUltimate ? 0.18 : 0));
+      player.javelin.speed = player.javelin.baseSpeed;
+      player.javelin.range = player.javelin.baseRange * (1 + (javelinUltimate ? 0.08 : 0));
       player.javelin.count = player.javelin.baseCount + javelinVolleyRank + (javelinUltimate ? 1 : 0);
-      player.javelin.pierce = player.javelin.basePierce + (javelinUltimate ? 3 : 0);
-      player.javelin.piercingVolleyActive = javelinUltimate;
+      const pierceBonusFromPath = Math.max(0, Math.floor((javelinPierceRank + 1) / 2));
+      player.javelin.pierce =
+        player.javelin.basePierce +
+        pierceBonusFromPath +
+        (javelinUltimate ? 1 : 0) +
+        (player.rage && player.rage.active && effects.rageAttackModifierUnlocked ? 1 : 0);
+      player.javelin.piercingVolleyActive = player.javelin.pierce > player.javelin.basePierce;
+      player.javelin.explosiveVolleyActive = javelinUltimate;
+      player.javelin.explosiveRadius = javelinUltimate ? player.javelin.baseExplosiveRadius : 0;
+      player.javelin.explosiveDamageMultiplier = javelinUltimate ? player.javelin.baseExplosiveDamageMultiplier : 0;
     }
 
     applyUpgrade(upgrade) {
@@ -1111,16 +2735,63 @@
       const run = this.currentRun;
       const player = run.player;
       if (player.invulnTimer > 0) return;
-      player.hp -= amount;
+      const effects = run.attributeEffects || this.calculateAttributeEffects(run.attributes);
+      let reduction = Math.max(0, effects.baseDamageReductionPct || 0);
+      const hpRatio = player.maxHp > 0 ? player.hp / player.maxHp : 1;
+      if (hpRatio <= 0.35) {
+        reduction += Math.max(0, effects.lowHpDamageReductionPct || 0);
+      }
+      if ((effects.repeatedHitMaxStacks || 0) > 0) {
+        reduction += Math.max(0, player.defenseStackCount || 0) * Math.max(0, effects.repeatedHitStackReductionPct || 0);
+      }
+      reduction = clamp(reduction, 0, 0.78);
+
+      let damageTaken = Math.max(0, amount) * (1 - reduction);
+      if ((effects.damageToRagePct || 0) > 0) {
+        const converted = damageTaken * effects.damageToRagePct;
+        damageTaken -= converted;
+        this.gainRage(run, converted * 6);
+      }
+
+      player.hp -= damageTaken;
       player.invulnTimer = DATA.PLAYER_BASE.invulnDuration;
+
+      if ((effects.repeatedHitMaxStacks || 0) > 0) {
+        player.defenseStackCount = Math.min(effects.repeatedHitMaxStacks, (player.defenseStackCount || 0) + 1);
+        player.defenseStackTimer = 4;
+      }
+      if ((effects.damageTakenSpeedBoostPct || 0) > 0) {
+        player.speedBoostTimer = Math.max(player.speedBoostTimer || 0, effects.damageTakenSpeedBoostDuration || 2);
+      }
+
       if (player.hp <= 0) {
         player.hp = 0;
+      }
+
+      if (effects.autoTriggerRageLowHp && !player.rage.active && player.hp > 0) {
+        const nextHpRatio = player.maxHp > 0 ? player.hp / player.maxHp : 0;
+        if (nextHpRatio <= 0.35) {
+          this.activateRage(run, 0.8);
+        }
       }
     }
 
     damageEnemy(enemy, amount) {
       if (enemy.dead) return;
-      enemy.hp -= amount;
+      const run = this.currentRun;
+      const effects = run.attributeEffects || this.calculateAttributeEffects(run.attributes);
+      let adjustedAmount = Math.max(0, amount);
+
+      if (this.isEnemyArmored(enemy)) {
+        adjustedAmount *= 1 + Math.max(0, effects.armoredBonusDamagePct || 0);
+        const armorRatio = this.getEnemyArmorRatio(enemy);
+        const effectiveArmor = Math.max(0, armorRatio - Math.max(0, effects.armorIgnorePct || 0));
+        const mitigatedArmor = effectiveArmor * (1 - Math.max(0, effects.armorBypassPct || 0));
+        adjustedAmount *= 1 - clamp(mitigatedArmor, 0, 0.85);
+      }
+
+      enemy.hp -= adjustedAmount;
+      this.gainRage(run, (run.player.rage.gainOnHit || 0) * Math.max(1, effects.rageGainMultiplier || 1));
       if (enemy.hp > 0) return;
       enemy.dead = true;
       this.onEnemyKilled(enemy);
@@ -1128,7 +2799,22 @@
 
     onEnemyKilled(enemy) {
       const run = this.currentRun;
+      const effects = run.attributeEffects || this.calculateAttributeEffects(run.attributes);
       run.stats.enemiesKilled += 1;
+      this.gainRage(run, (run.player.rage.gainOnKill || 0) * Math.max(1, effects.rageGainMultiplier || 1));
+      if (run.player.rage.active && (effects.killExtendsRageSeconds || 0) > 0) {
+        run.player.rage.timeLeft += effects.killExtendsRageSeconds;
+      }
+      if ((effects.killCooldownRecoveryPct || 0) > 0) {
+        run.player.axe.cooldownLeft = Math.max(
+          0,
+          run.player.axe.cooldownLeft - run.player.axe.cooldown * effects.killCooldownRecoveryPct
+        );
+        run.player.javelin.cooldownLeft = Math.max(
+          0,
+          run.player.javelin.cooldownLeft - run.player.javelin.cooldown * effects.killCooldownRecoveryPct
+        );
+      }
 
       this.spawnPickup(enemy.x, enemy.y, "xp", enemy.xpDrop);
       if (Math.random() <= enemy.goldChance) {
@@ -1140,25 +2826,55 @@
         run.stats.legacyXpEarned += DATA.ENEMIES.miniboss.legacyReward;
         this.spawnPickup(enemy.x, enemy.y, "xp", enemy.xpDrop * 0.75);
         this.spawnPickup(enemy.x + 14, enemy.y - 12, "gold", Math.floor(enemy.goldDrop * 0.6));
+        this.spawnBossLootDrops("miniboss", enemy);
       }
 
       if (enemy.typeId === "finalBoss") {
         run.stats.finalBossDefeated = true;
         run.stats.legacyXpEarned += DATA.ENEMIES.finalBoss.legacyReward;
         this.spawnPickup(enemy.x, enemy.y, "gold", enemy.goldDrop);
-        this.finishRun("victory");
+        this.spawnBossLootDrops("finalBoss", enemy);
+        this.startVictoryCollectionWindow();
       }
+
+      this.trySpawnBattleFuryPickup(enemy);
     }
 
-    spawnPickup(x, y, type, value) {
-      this.currentRun.entities.pickups.push({
+    spawnPickup(x, y, type, value, options) {
+      const opts = options || {};
+      const lootVisuals = (DATA.LOOT_SYSTEM && DATA.LOOT_SYSTEM.visuals) || {};
+      const itemRadius = Math.max(6, Number(lootVisuals.itemPickupRadius || 8));
+      const magnetConfig = this.getMagnetPowerupConfig();
+      const magnetRadius = Math.max(5, Number(magnetConfig.visual && magnetConfig.visual.radius));
+      const battleFuryConfig = this.getBattleFuryPowerupConfig();
+      const battleFuryRadius = Math.max(5, Number(battleFuryConfig.visual && battleFuryConfig.visual.radius));
+      const healingOrbConfig = this.getHealingOrbPowerupConfig();
+      const healingOrbRadius = Math.max(5, Number(healingOrbConfig.visual && healingOrbConfig.visual.radius));
+      const pickup = {
         id: this.nextEntityId(),
         x,
         y,
-        radius: type === "xp" ? 5 : 6,
+        radius:
+          type === "xp"
+            ? 5
+            : type === "item"
+            ? itemRadius
+            : type === magnetConfig.id
+            ? magnetRadius
+            : type === battleFuryConfig.id
+            ? battleFuryRadius
+            : type === healingOrbConfig.id
+            ? healingOrbRadius
+            : 6,
         type,
-        value: Math.max(1, Math.floor(value))
-      });
+        value: Math.max(1, Math.floor(value || 1))
+      };
+      if (type === "item") {
+        pickup.item = opts.item || null;
+        pickup.rarity = opts.rarity || (pickup.item && pickup.item.rarity) || "grey";
+        pickup.blockedTimer = 0;
+      }
+      this.currentRun.entities.pickups.push(pickup);
     }
 
     finishRun(reason) {
@@ -1184,6 +2900,7 @@
         enemiesKilled: run.stats.enemiesKilled,
         goldEarned: run.stats.goldEarned,
         legacyXpEarned: run.stats.legacyXpEarned,
+        deaths: reason === "death" ? 1 : 0,
         minibossesDefeated: run.stats.minibossesDefeated,
         finalBossAppeared: run.stats.finalBossAppeared,
         finalBossDefeated: run.stats.finalBossDefeated
@@ -1211,6 +2928,10 @@
         level: run.progression.level,
         gold: run.stats.goldEarned,
         legacy: run.stats.legacyXpEarned,
+        rageCurrent: run.player.rage && typeof run.player.rage.value === "number" ? run.player.rage.value : 0,
+        rageMax: run.player.rage && typeof run.player.rage.max === "number" ? run.player.rage.max : 100,
+        rageActive: Boolean(run.player.rage && run.player.rage.active),
+        rageSeconds: run.player.rage && typeof run.player.rage.timeLeft === "number" ? run.player.rage.timeLeft : 0,
         time: run.time,
         xpProgress: run.progression.xpToNext > 0 ? run.progression.xp / run.progression.xpToNext : 0
       });
@@ -1225,6 +2946,7 @@
 
       ctx.clearRect(0, 0, width, height);
       this.drawBackgroundGrid(width, height);
+      this.drawObstacles();
       this.drawPickups();
       this.drawPlayerProjectiles();
       this.drawEnemyProjectiles();
@@ -1232,6 +2954,7 @@
       this.drawPlayer();
       this.drawAttackEffects();
       this.drawTopTimers();
+      this.drawSwarmBanner();
     }
 
     drawBackgroundGrid(width, height) {
@@ -1241,8 +2964,9 @@
       ctx.strokeStyle = "rgba(55, 70, 95, 0.28)";
       ctx.lineWidth = 1;
       const spacing = 48;
-      const offsetX = ((this.currentRun.time * 8) % spacing + spacing) % spacing;
-      const offsetY = ((this.currentRun.time * 5) % spacing + spacing) % spacing;
+      const worldOffset = this.currentRun.worldOffset || { x: 0, y: 0 };
+      const offsetX = ((worldOffset.x % spacing) + spacing) % spacing;
+      const offsetY = ((worldOffset.y % spacing) + spacing) % spacing;
 
       for (let x = -offsetX; x <= width + spacing; x += spacing) {
         ctx.beginPath();
@@ -1256,6 +2980,47 @@
         ctx.lineTo(width, y);
         ctx.stroke();
       }
+    }
+
+    drawObstacles() {
+      const run = this.currentRun;
+      if (!run || !run.entities || !Array.isArray(run.entities.obstacles)) return;
+      const obstacles = run.entities.obstacles;
+      if (!obstacles.length) return;
+      const ctx = this.ctx;
+      const config = this.getObstacleConfig();
+      const fillColor = config.fillColor;
+      const strokeColor = config.strokeColor;
+
+      obstacles.forEach((obstacle) => {
+        if (!obstacle) return;
+        const r = Math.max(6, Number(obstacle.radius || 0));
+        if (
+          obstacle.x < -r - 6 ||
+          obstacle.y < -r - 6 ||
+          obstacle.x > run.world.width + r + 6 ||
+          obstacle.y > run.world.height + r + 6
+        ) {
+          return;
+        }
+
+        ctx.fillStyle = fillColor;
+        ctx.beginPath();
+        ctx.arc(obstacle.x, obstacle.y, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(obstacle.x, obstacle.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = "rgba(242, 248, 255, 0.1)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(obstacle.x - r * 0.2, obstacle.y - r * 0.18, r * 0.45, 0, Math.PI * 2);
+        ctx.stroke();
+      });
     }
 
     drawPlayer() {
@@ -1371,7 +3136,91 @@
 
     drawPickups() {
       const ctx = this.ctx;
+      const lootVisuals = (DATA.LOOT_SYSTEM && DATA.LOOT_SYSTEM.visuals) || {};
+      const rarityColors = lootVisuals.rarityColors || {};
+      const magnetConfig = this.getMagnetPowerupConfig();
+      const battleFuryConfig = this.getBattleFuryPowerupConfig();
+      const healingOrbConfig = this.getHealingOrbPowerupConfig();
       this.currentRun.entities.pickups.forEach((pickup) => {
+        if (pickup.type === "item") {
+          const rarityColor = rarityColors[pickup.rarity] || "#c2c8d6";
+          const r = pickup.radius;
+          ctx.fillStyle = rarityColor;
+          ctx.beginPath();
+          ctx.moveTo(pickup.x, pickup.y - r);
+          ctx.lineTo(pickup.x + r, pickup.y);
+          ctx.lineTo(pickup.x, pickup.y + r);
+          ctx.lineTo(pickup.x - r, pickup.y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = "rgba(248, 252, 255, 0.88)";
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+          return;
+        }
+        if (pickup.type === magnetConfig.id) {
+          const r = pickup.radius;
+          const fillColor = (magnetConfig.visual && magnetConfig.visual.fillColor) || "#76d68c";
+          const ringColor = (magnetConfig.visual && magnetConfig.visual.ringColor) || "#c6ffdb";
+          ctx.fillStyle = fillColor;
+          ctx.beginPath();
+          ctx.arc(pickup.x, pickup.y, r * 0.64, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = ringColor;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(pickup.x, pickup.y, r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(pickup.x, pickup.y, r * 1.35, Math.PI * 0.15, Math.PI * 1.85);
+          ctx.stroke();
+          return;
+        }
+        if (pickup.type === battleFuryConfig.id) {
+          const r = pickup.radius;
+          const fillColor = (battleFuryConfig.visual && battleFuryConfig.visual.fillColor) || "#ff9f5f";
+          const ringColor = (battleFuryConfig.visual && battleFuryConfig.visual.ringColor) || "#ffd5b0";
+          ctx.fillStyle = fillColor;
+          ctx.beginPath();
+          ctx.arc(pickup.x, pickup.y, r * 0.58, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = ringColor;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(pickup.x, pickup.y, r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(pickup.x - r * 0.2, pickup.y - r * 0.6);
+          ctx.lineTo(pickup.x + r * 0.5, pickup.y - r * 0.1);
+          ctx.lineTo(pickup.x + r * 0.1, pickup.y + r * 0.15);
+          ctx.lineTo(pickup.x + r * 0.5, pickup.y + r * 0.7);
+          ctx.stroke();
+          return;
+        }
+        if (pickup.type === healingOrbConfig.id) {
+          const r = pickup.radius;
+          const fillColor = (healingOrbConfig.visual && healingOrbConfig.visual.fillColor) || "#7ee28e";
+          const ringColor = (healingOrbConfig.visual && healingOrbConfig.visual.ringColor) || "#d4ffdc";
+          ctx.fillStyle = fillColor;
+          ctx.beginPath();
+          ctx.arc(pickup.x, pickup.y, r * 0.62, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = ringColor;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(pickup.x, pickup.y, r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = "rgba(235, 255, 238, 0.95)";
+          ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          ctx.moveTo(pickup.x - r * 0.35, pickup.y);
+          ctx.lineTo(pickup.x + r * 0.35, pickup.y);
+          ctx.moveTo(pickup.x, pickup.y - r * 0.35);
+          ctx.lineTo(pickup.x, pickup.y + r * 0.35);
+          ctx.stroke();
+          return;
+        }
         ctx.fillStyle = pickup.type === "xp" ? "#66c4ff" : "#f4c542";
         ctx.beginPath();
         ctx.arc(pickup.x, pickup.y, pickup.radius, 0, Math.PI * 2);
@@ -1406,12 +3255,114 @@
       const ctx = this.ctx;
       const timeUntilMiniboss = Math.max(0, run.spawn.nextMinibossTime - run.time);
       const finalBossIn = Math.max(0, DATA.RUN.finalBossTimeSeconds - run.time);
+      const swarmState = run.spawn && run.spawn.swarm ? run.spawn.swarm : null;
+      let swarmLine = "Next swarm: --:--";
+      if (swarmState && swarmState.enabled) {
+        if (swarmState.activeTimer > 0 && swarmState.currentEvent) {
+          const label = swarmState.currentEvent.type === "rush" ? "Rush" : "Encirclement";
+          swarmLine = `Swarm: ${label} (${swarmState.activeTimer.toFixed(1)}s)`;
+        } else if (swarmState.warningTimer > 0 && swarmState.pendingEvent) {
+          const label = swarmState.pendingEvent.type === "rush" ? "Rush" : "Encirclement";
+          swarmLine = `Incoming: ${label} (${swarmState.warningTimer.toFixed(1)}s)`;
+        } else if (Number.isFinite(swarmState.nextEventAt)) {
+          const nextIn = Math.max(0, swarmState.nextEventAt - run.time);
+          swarmLine = `Next swarm: ${formatTime(nextIn)}`;
+        }
+      }
+
       ctx.fillStyle = "rgba(11, 14, 21, 0.72)";
-      ctx.fillRect(run.world.width - 236, 10, 226, 56);
+      ctx.fillRect(run.world.width - 236, 10, 226, 76);
       ctx.fillStyle = "#dde5f5";
       ctx.font = "12px Trebuchet MS, sans-serif";
       ctx.fillText(`Next miniboss: ${formatTime(timeUntilMiniboss)}`, run.world.width - 224, 31);
       ctx.fillText(`Final boss: ${formatTime(finalBossIn)}`, run.world.width - 224, 50);
+      ctx.fillText(swarmLine, run.world.width - 224, 68);
+    }
+
+    drawRushDirectionMarker(direction, color) {
+      const run = this.currentRun;
+      if (!run) return;
+      const ctx = this.ctx;
+      const width = run.world.width;
+      const height = run.world.height;
+      const size = 11;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      if (direction === "right_to_left") {
+        const cx = width - 14;
+        const cy = height * 0.5;
+        ctx.moveTo(cx - size, cy);
+        ctx.lineTo(cx + size, cy - size);
+        ctx.lineTo(cx + size, cy + size);
+      } else if (direction === "top_to_bottom") {
+        const cx = width * 0.5;
+        const cy = 14;
+        ctx.moveTo(cx, cy + size);
+        ctx.lineTo(cx - size, cy - size);
+        ctx.lineTo(cx + size, cy - size);
+      } else if (direction === "bottom_to_top") {
+        const cx = width * 0.5;
+        const cy = height - 14;
+        ctx.moveTo(cx, cy - size);
+        ctx.lineTo(cx - size, cy + size);
+        ctx.lineTo(cx + size, cy + size);
+      } else {
+        const cx = 14;
+        const cy = height * 0.5;
+        ctx.moveTo(cx + size, cy);
+        ctx.lineTo(cx - size, cy - size);
+        ctx.lineTo(cx - size, cy + size);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    drawSwarmBanner() {
+      const run = this.currentRun;
+      if (!run || !run.spawn || !run.spawn.swarm) return;
+      const swarmState = run.spawn.swarm;
+      if (!swarmState.enabled) return;
+
+      let event = null;
+      let text = "";
+      let warning = false;
+      if (swarmState.warningTimer > 0 && swarmState.pendingEvent) {
+        event = swarmState.pendingEvent;
+        text = event.warningText || "Swarm Incoming";
+        warning = true;
+      } else if (swarmState.activeTimer > 0 && swarmState.currentEvent) {
+        event = swarmState.currentEvent;
+        text = event.activeText || "Swarm Active";
+      }
+
+      if (!event || !text) return;
+
+      const ctx = this.ctx;
+      const width = run.world.width;
+      const panelWidth = Math.min(320, Math.max(190, width - 130));
+      const panelX = (width - panelWidth) * 0.5;
+      const panelY = 14;
+      const panelH = 28;
+      const bg = warning ? "rgba(37, 62, 95, 0.78)" : "rgba(112, 35, 35, 0.82)";
+      const border = warning ? "rgba(137, 185, 255, 0.85)" : "rgba(255, 137, 137, 0.86)";
+      const textColor = warning ? "#d7e8ff" : "#ffe2e2";
+
+      ctx.fillStyle = bg;
+      ctx.fillRect(panelX, panelY, panelWidth, panelH);
+      ctx.strokeStyle = border;
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(panelX, panelY, panelWidth, panelH);
+      ctx.fillStyle = textColor;
+      ctx.font = "bold 13px Trebuchet MS, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, panelX + panelWidth * 0.5, panelY + panelH * 0.5);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+
+      if (event.type === "rush") {
+        this.drawRushDirectionMarker(event.direction, warning ? "rgba(124, 184, 255, 0.9)" : "rgba(255, 126, 126, 0.92)");
+      }
     }
 
     nextEntityId() {

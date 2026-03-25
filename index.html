@@ -26,13 +26,19 @@
         </div>
 
         <div class="panel details-panel">
-          <h2>Character Progression</h2>
-          <div id="skillTreeEmpty" class="skill-empty">Select a character to view skill trees.</div>
+          <div class="panel-header">
+            <h2>Character Progression</h2>
+            <button id="deleteCharacterBtn" class="btn btn-danger" type="button" disabled>Delete Character</button>
+          </div>
+          <div id="skillTreeEmpty" class="skill-empty">Select a character to view skill trees and inventory.</div>
           <div id="skillTreeView" class="hidden">
             <div id="characterSummary" class="character-summary"></div>
             <div class="skill-tabs">
               <button id="weaponsTabBtn" class="btn skill-tab active" type="button">Weapons</button>
-              <button id="classTabBtn" class="btn skill-tab" type="button">Class</button>
+              <button id="classTabBtn" class="btn skill-tab" type="button">Attributes</button>
+              <button id="inventoryTabBtn" class="btn skill-tab" type="button">Inventory</button>
+              <button id="merchantTabBtn" class="btn skill-tab" type="button">Merchant</button>
+              <button id="questsTabBtn" class="btn skill-tab" type="button">Quests</button>
             </div>
             <div id="skillTreeContent" class="skill-content"></div>
           </div>
@@ -42,6 +48,12 @@
 
     <section id="gameScreen" class="screen hidden">
       <canvas id="gameCanvas"></canvas>
+      <div id="healthHud" class="health-hud">
+        <div id="healthHudLabel" class="health-hud-label">HP: 0/0</div>
+        <div class="health-track">
+          <div id="healthFill" class="health-fill"></div>
+        </div>
+      </div>
       <div id="hud" class="hud">
         <div class="hud-row">
           <span id="hudName">-</span>
@@ -49,7 +61,11 @@
           <span id="hudLevel">Level: -</span>
           <span id="hudGold">Gold: 0</span>
           <span id="hudLegacy">Legacy XP: 0</span>
+          <span id="hudRage">Rage: 0/100</span>
           <span id="hudTimer">00:00</span>
+        </div>
+        <div class="rage-track">
+          <div id="rageFill" class="rage-fill"></div>
         </div>
         <div class="xp-track">
           <div id="xpFill" class="xp-fill"></div>
@@ -57,6 +73,18 @@
       </div>
     </section>
   </main>
+
+  <button id="itemReferenceToggleBtn" class="btn item-reference-toggle" type="button">Test Info</button>
+  <aside id="itemReferencePanel" class="item-reference-panel hidden" aria-label="Item reference panel">
+    <div class="item-reference-header">
+      <div>
+        <div class="item-reference-title">Item Reference</div>
+        <div class="item-reference-subtitle">Testing-only catalog and drop guidance</div>
+      </div>
+      <button id="itemReferenceCloseBtn" class="btn item-reference-close" type="button">Close</button>
+    </div>
+    <div id="itemReferenceContent" class="item-reference-content"></div>
+  </aside>
 
   <div id="createCharacterModal" class="overlay hidden">
     <div class="overlay-card">
@@ -99,6 +127,17 @@
       <div class="overlay-actions column">
         <button id="playAgainBtn" class="btn btn-primary">Play Again</button>
         <button id="endReturnHomeBtn" class="btn">Return Home</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="deleteCharacterOverlay" class="overlay hidden">
+    <div class="overlay-card">
+      <h2>Delete Character</h2>
+      <p id="deleteCharacterText">Are you sure you want to delete this character?</p>
+      <div class="overlay-actions">
+        <button id="cancelDeleteCharacterBtn" class="btn">Cancel</button>
+        <button id="confirmDeleteCharacterBtn" class="btn btn-danger">Delete</button>
       </div>
     </div>
   </div>

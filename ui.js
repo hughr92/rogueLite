@@ -17,6 +17,29 @@
     return `${minutes}:${remainder}`;
   }
 
+  function formatCompactCount(value) {
+    const count = Math.max(0, Math.floor(Number(value) || 0));
+    if (count < 1000) return String(count);
+
+    const suffixes = ["K", "M", "B", "T", "Qa", "Qi"];
+    let scaled = count;
+    let suffixIndex = -1;
+    while (scaled >= 1000 && suffixIndex < suffixes.length - 1) {
+      scaled /= 1000;
+      suffixIndex += 1;
+    }
+
+    const floored = Math.floor(scaled * 100) / 100;
+    const trimmed = floored.toFixed(2).replace(/\.?0+$/, "");
+    const suffix = suffixes[Math.max(0, suffixIndex)];
+    return `${trimmed}${suffix}`;
+  }
+
+  function formatInteger(value) {
+    const number = Math.max(0, Math.floor(Number(value) || 0));
+    return number.toLocaleString("en-US");
+  }
+
   function toTitle(id) {
     const text = String(id || "").replace(/_/g, " ");
     return text.charAt(0).toUpperCase() + text.slice(1);
@@ -32,11 +55,19 @@
       startRunBtn: byId("startRunBtn"),
       homeStatus: byId("homeStatus"),
       characterList: byId("characterList"),
+      itemReferenceToggleBtn: byId("itemReferenceToggleBtn"),
+      itemReferencePanel: byId("itemReferencePanel"),
+      itemReferenceCloseBtn: byId("itemReferenceCloseBtn"),
+      itemReferenceContent: byId("itemReferenceContent"),
+      deleteCharacterBtn: byId("deleteCharacterBtn"),
       skillTreeEmpty: byId("skillTreeEmpty"),
       skillTreeView: byId("skillTreeView"),
       characterSummary: byId("characterSummary"),
       weaponsTabBtn: byId("weaponsTabBtn"),
       classTabBtn: byId("classTabBtn"),
+      inventoryTabBtn: byId("inventoryTabBtn"),
+      merchantTabBtn: byId("merchantTabBtn"),
+      questsTabBtn: byId("questsTabBtn"),
       skillTreeContent: byId("skillTreeContent"),
       createCharacterModal: byId("createCharacterModal"),
       characterNameInput: byId("characterNameInput"),
@@ -53,21 +84,35 @@
       endRunStats: byId("endRunStats"),
       playAgainBtn: byId("playAgainBtn"),
       endReturnHomeBtn: byId("endReturnHomeBtn"),
+      deleteCharacterOverlay: byId("deleteCharacterOverlay"),
+      deleteCharacterText: byId("deleteCharacterText"),
+      cancelDeleteCharacterBtn: byId("cancelDeleteCharacterBtn"),
+      confirmDeleteCharacterBtn: byId("confirmDeleteCharacterBtn"),
       hudName: byId("hudName"),
       hudHp: byId("hudHp"),
+      healthHudLabel: byId("healthHudLabel"),
+      healthFill: byId("healthFill"),
       hudLevel: byId("hudLevel"),
       hudGold: byId("hudGold"),
       hudLegacy: byId("hudLegacy"),
+      hudRage: byId("hudRage"),
       hudTimer: byId("hudTimer"),
+      rageFill: byId("rageFill"),
       xpFill: byId("xpFill")
     };
 
     const handlers = {
       onCreateCharacter: null,
       onSelectCharacter: null,
+      onDeleteCharacter: null,
       onStartRun: null,
       onChooseUpgrade: null,
       onSpendClassPoint: null,
+      onMoveInventoryItem: null,
+      onBuyMerchantItem: null,
+      onSellInventoryItem: null,
+      onBuybackMerchantItem: null,
+      onClaimQuestReward: null,
       onResume: null,
       onRestart: null,
       onReturnHome: null,
@@ -77,7 +122,14 @@
     const state = {
       selectedCharacter: null,
       activeSkillTab: "weapons",
-      skillTreeProgress: null
+      skillTreeProgress: null,
+      inventoryStorageTabByCharacter: {},
+      merchantTabByCharacter: {},
+      inventoryRevealByCharacter: {},
+      draggingInventorySource: null,
+      pendingDeleteCharacterId: null,
+      itemReferenceOpen: false,
+      itemReferenceWeaponTypeFilter: "all"
     };
 
     function setVisible(element, visible) {
@@ -119,6 +171,29 @@
         if (handlers.onStartRun) handlers.onStartRun();
       });
 
+      dom.deleteCharacterBtn.addEventListener("click", () => {
+        if (!state.selectedCharacter || !handlers.onDeleteCharacter) return;
+        state.pendingDeleteCharacterId = state.selectedCharacter.id;
+        dom.deleteCharacterText.textContent = `Delete ${state.selectedCharacter.name}? This cannot be undone.`;
+        setVisible(dom.deleteCharacterOverlay, true);
+      });
+
+      dom.cancelDeleteCharacterBtn.addEventListener("click", () => {
+        state.pendingDeleteCharacterId = null;
+        setVisible(dom.deleteCharacterOverlay, false);
+      });
+
+      dom.confirmDeleteCharacterBtn.addEventListener("click", () => {
+        if (!state.pendingDeleteCharacterId || !handlers.onDeleteCharacter) {
+          setVisible(dom.deleteCharacterOverlay, false);
+          return;
+        }
+        const deleteId = state.pendingDeleteCharacterId;
+        state.pendingDeleteCharacterId = null;
+        setVisible(dom.deleteCharacterOverlay, false);
+        handlers.onDeleteCharacter(deleteId);
+      });
+
       dom.resumeBtn.addEventListener("click", () => {
         if (handlers.onResume) handlers.onResume();
       });
@@ -146,6 +221,42 @@
       dom.classTabBtn.addEventListener("click", () => {
         setActiveSkillTab("class");
       });
+
+      dom.inventoryTabBtn.addEventListener("click", () => {
+        setActiveSkillTab("inventory");
+      });
+
+      if (dom.merchantTabBtn) {
+        dom.merchantTabBtn.addEventListener("click", () => {
+          setActiveSkillTab("merchant");
+        });
+      }
+
+      if (dom.questsTabBtn) {
+        dom.questsTabBtn.addEventListener("click", () => {
+          setActiveSkillTab("quests");
+        });
+      }
+
+      if (dom.itemReferenceToggleBtn) {
+        dom.itemReferenceToggleBtn.addEventListener("click", () => {
+          state.itemReferenceOpen = !state.itemReferenceOpen;
+          syncItemReferenceVisibility();
+          if (state.itemReferenceOpen) {
+            renderItemReferencePanel();
+          }
+        });
+      }
+
+      if (dom.itemReferenceCloseBtn) {
+        dom.itemReferenceCloseBtn.addEventListener("click", () => {
+          state.itemReferenceOpen = false;
+          syncItemReferenceVisibility();
+        });
+      }
+
+      renderItemReferencePanel();
+      syncItemReferenceVisibility();
     }
 
     function hideCreateError() {
@@ -185,12 +296,12 @@
         const meta2 = createElement(
           "div",
           "char-meta",
-          `Gold ${character.gold} | Legacy XP ${character.legacyXp} | Best ${formatTime(character.bestSurvivalTime)}`
+          `Gold ${character.gold} | XP ${character.legacyXp} | Best ${formatTime(character.bestSurvivalTime)}`
         );
         const meta3 = createElement(
           "div",
           "char-meta",
-          `Runs ${character.runsPlayed} | Minibosses ${character.minibossKills}`
+          `Runs ${character.runsPlayed} | Minibosses ${character.minibossKills} | Kills ${formatCompactCount(character.enemyKills)}`
         );
 
         card.append(name, meta1, meta2, meta3);
@@ -249,13 +360,31 @@
       if (!character) {
         dom.characterSummary.innerHTML = "";
         dom.skillTreeContent.innerHTML = "";
+        dom.skillTreeContent.classList.remove("inventory-content");
         setVisible(dom.skillTreeEmpty, true);
         setVisible(dom.skillTreeView, false);
+        dom.deleteCharacterBtn.disabled = true;
+        if (dom.merchantTabBtn) {
+          setVisible(dom.merchantTabBtn, true);
+        }
+        state.pendingDeleteCharacterId = null;
+        setVisible(dom.deleteCharacterOverlay, false);
         return;
+      }
+
+      const merchantUnlocked = Boolean(
+        character.merchantUnlocked || (character.unlockedFeatures && character.unlockedFeatures.merchant)
+      );
+      if (dom.merchantTabBtn) {
+        setVisible(dom.merchantTabBtn, merchantUnlocked);
+      }
+      if (!merchantUnlocked && state.activeSkillTab === "merchant") {
+        state.activeSkillTab = "quests";
       }
 
       setVisible(dom.skillTreeEmpty, false);
       setVisible(dom.skillTreeView, true);
+      dom.deleteCharacterBtn.disabled = false;
       renderCharacterSummary(character);
       setActiveSkillTab(state.activeSkillTab);
     }
@@ -269,9 +398,10 @@
         { label: "Race", value: raceInfo ? raceInfo.label : toTitle(character.race) },
         { label: "Class", value: classInfo ? classInfo.label : toTitle(character.classId) },
         { label: "Gold", value: String(character.gold) },
-        { label: "Legacy XP", value: String(character.legacyXp) },
-        { label: "Legacy Level", value: String(character.legacyLevel || 1) },
-        { label: "Class Points", value: String(character.classSkillPoints || 0) },
+        { label: "Total Kills", value: formatCompactCount(character.enemyKills || 0) },
+        { label: "XP", value: String(character.legacyXp) },
+        { label: "Level", value: String(character.legacyLevel || 1) },
+        { label: "Attribute Points", value: String(character.attributePoints || character.classSkillPoints || 0) },
         { label: "Best Time", value: formatTime(character.bestSurvivalTime || 0) }
       ];
 
@@ -282,18 +412,69 @@
         cell.append(label, value);
         dom.characterSummary.appendChild(cell);
       });
+
+      const xpIntoLevel = Math.max(0, Math.floor(Number(character.legacyXpIntoLevel || 0)));
+      const xpToNextLevel = Math.max(1, Math.floor(Number(character.legacyXpToNextLevel || 1)));
+      const xpProgress = Math.max(0, Math.min(1, xpIntoLevel / xpToNextLevel));
+      const xpTooltip = `XP to next level: ${formatInteger(xpIntoLevel)} / ${formatInteger(xpToNextLevel)}`;
+
+      const xpBar = createElement("div", "summary-xp");
+      xpBar.title = xpTooltip;
+
+      const xpHead = createElement("div", "summary-xp-head");
+      xpHead.append(
+        createElement("strong", "", "XP"),
+        createElement("span", "", `${(xpProgress * 100).toFixed(1)}%`)
+      );
+
+      const xpTrack = createElement("div", "summary-xp-track");
+      xpTrack.title = xpTooltip;
+      const xpFill = createElement("div", "summary-xp-fill");
+      xpFill.style.width = `${(xpProgress * 100).toFixed(2)}%`;
+      xpTrack.appendChild(xpFill);
+
+      const xpText = createElement(
+        "div",
+        "summary-xp-value",
+        `${formatInteger(xpIntoLevel)} / ${formatInteger(xpToNextLevel)}`
+      );
+
+      xpBar.append(xpHead, xpTrack, xpText);
+      dom.characterSummary.appendChild(xpBar);
     }
 
     function setActiveSkillTab(tabName) {
       if (!state.selectedCharacter) return;
-      state.activeSkillTab = tabName === "class" ? "class" : "weapons";
+      const merchantUnlocked = Boolean(
+        state.selectedCharacter.merchantUnlocked ||
+          (state.selectedCharacter.unlockedFeatures && state.selectedCharacter.unlockedFeatures.merchant)
+      );
+      if (tabName === "class") {
+        state.activeSkillTab = "class";
+      } else if (tabName === "inventory") {
+        state.activeSkillTab = "inventory";
+      } else if (tabName === "merchant" && merchantUnlocked) {
+        state.activeSkillTab = "merchant";
+      } else if (tabName === "quests") {
+        state.activeSkillTab = "quests";
+      } else {
+        state.activeSkillTab = "weapons";
+      }
       dom.weaponsTabBtn.classList.toggle("active", state.activeSkillTab === "weapons");
       dom.classTabBtn.classList.toggle("active", state.activeSkillTab === "class");
+      dom.inventoryTabBtn.classList.toggle("active", state.activeSkillTab === "inventory");
+      if (dom.merchantTabBtn) {
+        dom.merchantTabBtn.classList.toggle("active", state.activeSkillTab === "merchant");
+      }
+      if (dom.questsTabBtn) {
+        dom.questsTabBtn.classList.toggle("active", state.activeSkillTab === "quests");
+      }
       renderSkillTreeTab();
     }
 
     function renderSkillTreeTab() {
       dom.skillTreeContent.innerHTML = "";
+      dom.skillTreeContent.classList.remove("inventory-content");
       if (!state.selectedCharacter) return;
 
       const classId = state.selectedCharacter.classId || state.selectedCharacter.class;
@@ -306,6 +487,13 @@
 
       if (state.activeSkillTab === "class") {
         renderClassTab(treeDefinition.classTree);
+      } else if (state.activeSkillTab === "inventory") {
+        dom.skillTreeContent.classList.add("inventory-content");
+        renderInventoryTab(state.selectedCharacter);
+      } else if (state.activeSkillTab === "merchant") {
+        renderMerchantTab(state.selectedCharacter);
+      } else if (state.activeSkillTab === "quests") {
+        renderQuestsTab(state.selectedCharacter);
       } else {
         renderWeaponsTab(treeDefinition.weapons);
       }
@@ -377,65 +565,14 @@
       });
     }
 
-    function parseNodeMaxRank(nodeInfo) {
-      if (!nodeInfo) return 1;
-      if (typeof nodeInfo.maxRank === "number") return Math.max(1, Math.floor(nodeInfo.maxRank));
-      if (typeof nodeInfo.levels === "string") {
-        const text = nodeInfo.levels.trim();
-        if (text.includes("-")) {
-          const rangeParts = text.split("-");
-          const maxPart = Number(rangeParts[1]);
-          if (!Number.isNaN(maxPart)) return Math.max(1, Math.floor(maxPart));
-        }
-        if (text.includes("/")) {
-          const slashParts = text.split("/");
-          const maxPart = Number(slashParts[1]);
-          if (!Number.isNaN(maxPart)) return Math.max(1, Math.floor(maxPart));
-        }
-        const numeric = Number(text);
-        if (!Number.isNaN(numeric)) return Math.max(1, Math.floor(numeric));
-      }
-      return nodeInfo.capstone ? 1 : 5;
-    }
-
-    function getClassNodeRank(branchId, nodeId) {
-      const ranks = (state.selectedCharacter && state.selectedCharacter.classNodeRanks) || {};
-      return Number(ranks[`${branchId}.${nodeId}`] || 0);
-    }
-
-    function getBranchSpentPoints(branch) {
-      return (branch.nodes || []).reduce((sum, nodeInfo) => {
-        return sum + getClassNodeRank(branch.id, nodeInfo.id);
-      }, 0);
-    }
-
-    function isClassNodeSpendable(branch, nodeInfo, nodeIndex) {
-      const character = state.selectedCharacter;
-      if (!character) return false;
-      if ((character.classSkillPoints || 0) <= 0) return false;
-
-      const currentRank = getClassNodeRank(branch.id, nodeInfo.id);
-      const maxRank = parseNodeMaxRank(nodeInfo);
-      if (currentRank >= maxRank) return false;
-
-      if (nodeIndex > 0) {
-        const previousNode = branch.nodes[nodeIndex - 1];
-        if (getClassNodeRank(branch.id, previousNode.id) <= 0) return false;
-      }
-
-      if (nodeInfo.capstone) {
-        const branchSpent = getBranchSpentPoints(branch);
-        const needed = nodeInfo.branchPointsRequired || 15;
-        if (branchSpent < needed) return false;
-      }
-
-      return true;
-    }
-
     function renderClassTab(classDefinition) {
       if (!classDefinition) return;
       const title = createElement("div", "skill-title", classDefinition.title);
       const subtitle = createElement("div", "skill-subtitle", classDefinition.subtitle);
+      const character = state.selectedCharacter;
+      const maxLevel = Math.max(1, Math.floor(classDefinition.maxLevel || 10));
+      const attributes = Array.isArray(classDefinition.attributes) ? classDefinition.attributes : [];
+      const availablePoints = (character && (character.attributePoints || character.classSkillPoints)) || 0;
 
       const panel = createElement("div", "class-placeholder");
       const pointsBar = createElement("div", "class-points-bar");
@@ -443,107 +580,115 @@
         createElement(
           "div",
           "class-points-primary",
-          `Unspent Class Points: ${(state.selectedCharacter && state.selectedCharacter.classSkillPoints) || 0}`
+          `Unspent Attribute Points: ${availablePoints}`
         )
       );
       pointsBar.appendChild(
         createElement(
           "div",
           "class-points-secondary",
-          `Legacy Level ${(state.selectedCharacter && state.selectedCharacter.legacyLevel) || 1}`
+          `Level ${(character && character.legacyLevel) || 1}`
         )
       );
       panel.appendChild(pointsBar);
 
-      const introList = Array.isArray(classDefinition.philosophy) ? classDefinition.philosophy : classDefinition.flavor;
+      const introList = Array.isArray(classDefinition.intro) ? classDefinition.intro : classDefinition.philosophy;
       if (Array.isArray(introList)) {
         introList.forEach((line) => {
           panel.appendChild(createElement("p", "class-flavor", line));
         });
       }
 
-      if (classDefinition.coreMechanic) {
-        const mechanic = createElement("div", "class-mechanic");
-        mechanic.appendChild(createElement("div", "class-mechanic-title", classDefinition.coreMechanic.title));
-
-        if (Array.isArray(classDefinition.coreMechanic.buildsFrom)) {
-          const buildsFrom = createElement(
-            "div",
-            "class-mechanic-line",
-            `Builds from: ${classDefinition.coreMechanic.buildsFrom.join(", ")}`
-          );
-          mechanic.appendChild(buildsFrom);
-        }
-
-        if (Array.isArray(classDefinition.coreMechanic.effects)) {
-          const effects = createElement(
-            "div",
-            "class-mechanic-line",
-            `Base effects: ${classDefinition.coreMechanic.effects.join(" | ")}`
-          );
-          mechanic.appendChild(effects);
-        }
-        panel.appendChild(mechanic);
-      }
-
-      if (Array.isArray(classDefinition.branches) && classDefinition.branches.length) {
+      if (attributes.length) {
         const branchGrid = createElement("div", "class-branch-grid");
-        classDefinition.branches.forEach((branch) => {
+        attributes.forEach((attribute) => {
+          const currentLevel = Number((character && character.attributeLevels && character.attributeLevels[attribute.id]) || 0);
+          const isMaxed = currentLevel >= maxLevel;
+          const spendable = availablePoints > 0 && !isMaxed;
+          const nextThreshold = (attribute.thresholds || []).find((threshold) => currentLevel < threshold.level) || null;
+          const progress = Math.max(0, Math.min(1, currentLevel / maxLevel));
+
           const branchCard = createElement("section", "class-branch-card");
-          branchCard.appendChild(createElement("div", "class-branch-title", branch.label));
-          branchCard.appendChild(createElement("div", "class-branch-focus", branch.focus || ""));
+          branchCard.appendChild(createElement("div", "class-branch-title", attribute.label));
+          branchCard.appendChild(createElement("div", "class-branch-focus", attribute.description || ""));
 
-          const nodes = createElement("ul", "class-node-list");
-          (branch.nodes || []).forEach((nodeInfo, nodeIndex) => {
-            const node = createElement("li", "class-node");
-            if (nodeInfo.capstone) node.classList.add("class-node-capstone");
+          const levelRow = createElement("div", "attribute-level-row");
+          levelRow.appendChild(createElement("div", "attribute-level-text", `Level ${currentLevel}/${maxLevel}`));
+          const barTrack = createElement("div", "attribute-level-track");
+          const barFill = createElement("div", "attribute-level-fill");
+          barFill.style.width = `${(progress * 100).toFixed(1)}%`;
+          barTrack.appendChild(barFill);
+          levelRow.appendChild(barTrack);
+          branchCard.appendChild(levelRow);
 
-            const currentRank = getClassNodeRank(branch.id, nodeInfo.id);
-            const maxRank = parseNodeMaxRank(nodeInfo);
-            const isMaxed = currentRank >= maxRank;
-            const isSpendable = isClassNodeSpendable(branch, nodeInfo, nodeIndex);
+          if (attribute.summaryEffect) {
+            branchCard.appendChild(createElement("div", "attribute-summary", attribute.summaryEffect));
+          }
 
-            const nodeTitle = createElement("div", "class-node-title");
-            nodeTitle.appendChild(createElement("strong", "", nodeInfo.label));
-            nodeTitle.appendChild(createElement("span", "class-node-levels", `${currentRank}/${maxRank}`));
-            node.appendChild(nodeTitle);
-            node.appendChild(createElement("div", "class-node-desc", nodeInfo.description));
+          if (Array.isArray(attribute.scaling) && attribute.scaling.length) {
+            const scalingList = createElement("ul", "attribute-effect-list");
+            attribute.scaling.forEach((effect) => {
+              scalingList.appendChild(createElement("li", "", effect));
+            });
+            branchCard.appendChild(scalingList);
+          }
 
-            const nodeStatus = createElement("div", "class-node-status");
-            if (isMaxed) {
-              node.classList.add("class-node-maxed");
-              nodeStatus.textContent = "Maxed";
-            } else if (isSpendable) {
-              node.classList.add("class-node-spendable");
-              nodeStatus.textContent = "Available - click to spend 1 point";
-            } else {
-              node.classList.add("class-node-locked");
-              nodeStatus.textContent = "Locked";
-            }
-            node.appendChild(nodeStatus);
+          if (Array.isArray(attribute.thresholds) && attribute.thresholds.length) {
+            const thresholds = createElement("div", "attribute-thresholds");
+            thresholds.appendChild(createElement("div", "attribute-thresholds-title", "Thresholds"));
+            const thresholdList = createElement("ul", "attribute-threshold-list");
+            attribute.thresholds.forEach((threshold) => {
+              const item = createElement("li", "attribute-threshold-item");
+              if (currentLevel >= threshold.level) {
+                item.classList.add("attribute-threshold-unlocked");
+              } else if (nextThreshold && nextThreshold.level === threshold.level) {
+                item.classList.add("attribute-threshold-next");
+              }
+              const header = createElement("div", "attribute-threshold-header");
+              header.appendChild(createElement("strong", "", `Lv.${threshold.level} ${threshold.label || ""}`.trim()));
+              item.appendChild(header);
+              if (threshold.description) {
+                item.appendChild(createElement("div", "attribute-threshold-desc", threshold.description));
+              }
+              thresholdList.appendChild(item);
+            });
+            thresholds.appendChild(thresholdList);
+            branchCard.appendChild(thresholds);
+          }
 
-            if (nodeInfo.requirement) {
-              node.appendChild(createElement("div", "class-node-req", `Requirement: ${nodeInfo.requirement}`));
-            }
+          const spendStatus = createElement(
+            "div",
+            "class-node-status",
+            isMaxed ? "Maxed" : spendable ? "Available - spend 1 point" : "Not enough points"
+          );
+          branchCard.appendChild(spendStatus);
 
-            if (isSpendable && handlers.onSpendClassPoint) {
-              node.addEventListener("click", () => {
-                handlers.onSpendClassPoint(branch.id, nodeInfo.id);
-              });
-            }
-            nodes.appendChild(node);
-          });
+          if (!isMaxed && handlers.onSpendClassPoint) {
+            const spendButton = createElement("button", "btn");
+            spendButton.type = "button";
+            spendButton.textContent = "Spend Point";
+            spendButton.disabled = !spendable;
+            spendButton.addEventListener("click", () => {
+              handlers.onSpendClassPoint(attribute.id);
+            });
+            branchCard.appendChild(spendButton);
+          }
 
-          branchCard.appendChild(nodes);
+          if (nextThreshold) {
+            branchCard.appendChild(
+              createElement(
+                "div",
+                "class-node-req",
+                `Next threshold at Lv.${nextThreshold.level}: ${nextThreshold.label || "Attribute milestone"}`
+              )
+            );
+          } else {
+            branchCard.appendChild(createElement("div", "class-node-req", "All thresholds unlocked."));
+          }
+
           branchGrid.appendChild(branchCard);
-        });
+          });
         panel.appendChild(branchGrid);
-      } else if (Array.isArray(classDefinition.placeholders)) {
-        const fallback = createElement("ul", "class-points");
-        classDefinition.placeholders.forEach((point) => {
-          fallback.appendChild(createElement("li", "", point));
-        });
-        panel.appendChild(fallback);
       }
 
       if (Array.isArray(classDefinition.buildIdentityExamples) && classDefinition.buildIdentityExamples.length) {
@@ -568,6 +713,1072 @@
       dom.skillTreeContent.append(title, subtitle, panel);
     }
 
+    function getActiveStorageTabId(character) {
+      const fallback = "general";
+      if (!character) return fallback;
+      const fromState = state.inventoryStorageTabByCharacter[character.id];
+      return fromState || fallback;
+    }
+
+    function setActiveStorageTabId(character, tabId) {
+      if (!character) return;
+      state.inventoryStorageTabByCharacter[character.id] = tabId;
+    }
+
+    function getActiveMerchantTabId(character) {
+      const fallback = "buy";
+      if (!character) return fallback;
+      const fromState = state.merchantTabByCharacter[character.id];
+      return fromState === "sell" ? "sell" : fallback;
+    }
+
+    function setActiveMerchantTabId(character, tabId) {
+      if (!character) return;
+      state.merchantTabByCharacter[character.id] = tabId === "sell" ? "sell" : "buy";
+    }
+
+    function normalizeStorageLocation(location) {
+      if (!location || typeof location !== "object") return null;
+      const tabId = typeof location.tabId === "string" ? location.tabId : "";
+      const index = Number(location.index);
+      const allowedTabs = ["general", "reserve1", "reserve2"];
+      if (!allowedTabs.includes(tabId)) return null;
+      if (!Number.isInteger(index) || index < 0 || index >= 30) return null;
+      return { tabId, index };
+    }
+
+    function revealStorageLocation(character, location) {
+      if (!character) return;
+      const normalized = normalizeStorageLocation(location);
+      if (!normalized) return;
+      state.selectedCharacter = character;
+      setActiveStorageTabId(character, normalized.tabId);
+      state.inventoryRevealByCharacter[character.id] = {
+        ...normalized,
+        expiresAt: Date.now() + 2600
+      };
+      setActiveSkillTab("inventory");
+    }
+
+    function renderInventoryTab(character, options) {
+      if (!character) return;
+      const safeOptions = options || {};
+      const sellMode = !!safeOptions.sellMode;
+      const onSellInventoryItem =
+        typeof safeOptions.onSellInventoryItem === "function" ? safeOptions.onSellInventoryItem : handlers.onSellInventoryItem;
+      const getSellPrice =
+        typeof safeOptions.getSellPrice === "function"
+          ? safeOptions.getSellPrice
+          : window.RL_SAVE && typeof window.RL_SAVE.calculateMerchantSellPrice === "function"
+          ? window.RL_SAVE.calculateMerchantSellPrice
+          : null;
+      const mountEl = safeOptions.mountEl || dom.skillTreeContent;
+
+      const inventory = character.inventory || {};
+      const equipment = inventory.equipment || {};
+      const storageTabs = inventory.storageTabs || {};
+      const tabDefinitions = [
+        { id: "general", label: "General" },
+        { id: "reserve1", label: "Tab 2" },
+        { id: "reserve2", label: "Tab 3" }
+      ];
+
+      const activeStorageTabId = getActiveStorageTabId(character);
+      const safeTabId = tabDefinitions.some((tab) => tab.id === activeStorageTabId) ? activeStorageTabId : "general";
+      setActiveStorageTabId(character, safeTabId);
+      const revealState = state.inventoryRevealByCharacter[character.id] || null;
+      let revealedSlotElement = null;
+      const isRevealActive = revealState && Date.now() <= Number(revealState.expiresAt || 0);
+      if (revealState && !isRevealActive) {
+        delete state.inventoryRevealByCharacter[character.id];
+      }
+
+      const rarityLabel = (rarityId) => {
+        const rarity = window.RL_DATA.ITEM_RARITIES && window.RL_DATA.ITEM_RARITIES[rarityId];
+        return rarity ? rarity.label : "";
+      };
+
+      const itemTypeLabel = (itemTypeId) => {
+        const itemType = window.RL_DATA.ITEM_TYPES && window.RL_DATA.ITEM_TYPES[itemTypeId];
+        return itemType ? itemType.label : "";
+      };
+
+      const getItemDisplay = (itemValue) => {
+        if (!itemValue) {
+          return { name: "Empty", meta: "", stats: "" };
+        }
+        if (typeof itemValue === "string") {
+          return { name: itemValue, meta: "", stats: "" };
+        }
+        const name = itemValue.name || itemValue.templateId || "Item";
+        const rarity = rarityLabel(itemValue.rarity);
+        const type = itemTypeLabel(itemValue.itemType);
+        const weaponWeight = Number(itemValue.weaponSlotWeight);
+        const hasWeaponWeight =
+          (itemValue.itemType === "melee_weapon" || itemValue.itemType === "ranged_weapon") &&
+          !Number.isNaN(weaponWeight);
+        const weightLabel = hasWeaponWeight
+          ? `${Math.max(1, Math.min(2, Math.floor(weaponWeight)))} Slot${Math.floor(weaponWeight) === 1 ? "" : "s"}`
+          : "";
+        const metaParts = [rarity, type, weightLabel].filter(Boolean);
+        const stats = itemValue.stats && typeof itemValue.stats === "object" ? itemValue.stats : {};
+        const statText = Object.entries(stats)
+          .map(([key, rawValue]) => {
+            const amount = Number(rawValue);
+            if (Number.isNaN(amount)) return "";
+            if (key === "slashingDamageBonus" || key === "meleeDamageBonus") return `+${amount} Slashing Damage`;
+            if (key === "piercingDamageBonus" || key === "rangedDamageBonus") return `+${amount} Piercing Damage`;
+            if (key === "bludgeoningDamageBonus") return `+${amount} Bludgeoning Damage`;
+            if (key === "armor") return `+${amount} Armor`;
+            const label = key.replace(/([A-Z])/g, " $1").replace(/_/g, " ");
+            const normalized = label.charAt(0).toUpperCase() + label.slice(1);
+            return `${amount >= 0 ? "+" : ""}${amount} ${normalized}`.trim();
+          })
+          .filter(Boolean)
+          .join(" | ");
+        return { name, meta: metaParts.join(" | "), stats: statText };
+      };
+
+      const normalizeEquipmentSlotKey = (slotKey) => {
+        if (!slotKey || typeof slotKey !== "string") return "";
+        if (slotKey === "primaryWeapon") return "primaryMeleeWeapon";
+        if (slotKey === "secondaryWeapon") return "rangedWeapon";
+        return slotKey;
+      };
+
+      const getAllowedSlotsForItem = (item) => {
+        if (!item || typeof item !== "object") return [];
+        const rawSlots = Array.isArray(item.allowedSlots)
+          ? item.allowedSlots
+          : typeof item.allowedSlot === "string"
+          ? [item.allowedSlot]
+          : [];
+        const normalizedSlots = rawSlots
+          .map((slotKey) => normalizeEquipmentSlotKey(slotKey))
+          .filter((slotKey, index, list) => slotKey && list.indexOf(slotKey) === index);
+        if (normalizedSlots.length) return normalizedSlots;
+        if (item.itemType === "melee_weapon") return ["primaryMeleeWeapon", "secondaryMeleeWeapon"];
+        if (item.itemType === "ranged_weapon") return ["rangedWeapon"];
+        if (item.itemType === "helmet") return ["helmet"];
+        if (item.itemType === "chest") return ["chest"];
+        if (item.itemType === "ring") return ["ring1", "ring2"];
+        if (item.itemType === "amulet") return ["amulet"];
+        return [];
+      };
+
+      const serializeLocation = (location) => JSON.stringify(location);
+      const parseLocation = (serialized) => {
+        try {
+          return JSON.parse(serialized);
+        } catch (error) {
+          return null;
+        }
+      };
+
+      const startDrag = (event, sourceLocation) => {
+        state.draggingInventorySource = sourceLocation;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", serializeLocation(sourceLocation));
+      };
+
+      const clearDragState = () => {
+        state.draggingInventorySource = null;
+      };
+
+      const clearDropHighlight = (element) => {
+        element.classList.remove("inventory-drop-valid");
+        element.classList.remove("inventory-drop-invalid");
+      };
+
+      const isValidLocation = (location) => {
+        if (!location || typeof location !== "object") return false;
+        if (location.kind === "equipment") {
+          return typeof location.slot === "string" && typeof equipment[location.slot] !== "undefined";
+        }
+        if (location.kind === "storage") {
+          if (!Array.isArray(storageTabs[location.tabId])) return false;
+          return Number.isInteger(location.index) && location.index >= 0 && location.index < 30;
+        }
+        return false;
+      };
+
+      const getItemAtLocation = (location) => {
+        if (!isValidLocation(location)) return null;
+        if (location.kind === "equipment") return equipment[location.slot] || null;
+        return storageTabs[location.tabId][location.index] || null;
+      };
+
+      const fitsTargetLocation = (item, location) => {
+        if (!item) return true;
+        if (location.kind !== "equipment") return true;
+        return getAllowedSlotsForItem(item).includes(location.slot);
+      };
+
+      const canDropFromTo = (fromLocation, toLocation) => {
+        if (!isValidLocation(fromLocation) || !isValidLocation(toLocation)) return false;
+        const sameLocation =
+          fromLocation.kind === toLocation.kind &&
+          ((fromLocation.kind === "equipment" && fromLocation.slot === toLocation.slot) ||
+            (fromLocation.kind === "storage" &&
+              fromLocation.tabId === toLocation.tabId &&
+              fromLocation.index === toLocation.index));
+        if (sameLocation) return true;
+
+        const sourceItem = getItemAtLocation(fromLocation);
+        if (!sourceItem) return false;
+        const targetItem = getItemAtLocation(toLocation);
+
+        if (!fitsTargetLocation(sourceItem, toLocation)) return false;
+        if (fromLocation.kind === "equipment" && targetItem && !fitsTargetLocation(targetItem, fromLocation)) {
+          return false;
+        }
+        return true;
+      };
+
+      const attachDropHandlers = (element, targetLocation) => {
+        element.addEventListener("dragover", (event) => {
+          event.preventDefault();
+          const fromData = parseLocation(event.dataTransfer.getData("text/plain")) || state.draggingInventorySource;
+          const canDrop = canDropFromTo(fromData, targetLocation);
+          event.dataTransfer.dropEffect = canDrop ? "move" : "none";
+          clearDropHighlight(element);
+          element.classList.add(canDrop ? "inventory-drop-valid" : "inventory-drop-invalid");
+        });
+        element.addEventListener("dragleave", () => {
+          clearDropHighlight(element);
+        });
+        element.addEventListener("drop", (event) => {
+          event.preventDefault();
+          clearDropHighlight(element);
+          const fromData = parseLocation(event.dataTransfer.getData("text/plain")) || state.draggingInventorySource;
+          const canDrop = canDropFromTo(fromData, targetLocation);
+          clearDragState();
+          if (!fromData || !canDrop || !handlers.onMoveInventoryItem) return;
+          handlers.onMoveInventoryItem(fromData, targetLocation);
+        });
+      };
+
+      const panel = createElement("div", "inventory-panel");
+
+      const equipmentSection = createElement("section", "inventory-section");
+      equipmentSection.appendChild(createElement("div", "skill-title", "Equipment"));
+      equipmentSection.appendChild(
+        createElement(
+          "div",
+          "skill-subtitle",
+          sellMode
+            ? "Double-click an equipped item to sell it to the merchant."
+            : "Equip items to enhance your character (coming soon)"
+        )
+      );
+
+      const equipmentLayout = createElement("div", "equipment-layout");
+      equipmentLayout.appendChild(createElement("div", "equipment-silhouette", "Barbarian"));
+
+      const slots = [
+        { key: "helmet", label: "Helmet", className: "slot-head" },
+        { key: "chest", label: "Chest", className: "slot-chest" },
+        { key: "primaryMeleeWeapon", label: "Primary Melee", className: "slot-primary-melee" },
+        { key: "secondaryMeleeWeapon", label: "Secondary Melee", className: "slot-secondary-melee" },
+        { key: "rangedWeapon", label: "Ranged", className: "slot-ranged-weapon" },
+        { key: "ring1", label: "Ring 1", className: "slot-ring1" },
+        { key: "ring2", label: "Ring 2", className: "slot-ring2" },
+        { key: "amulet", label: "Amulet", className: "slot-amulet" }
+      ];
+
+      slots.forEach((slot) => {
+        const value = equipment[slot.key];
+        const display = getItemDisplay(value);
+        const slotBox = createElement("div", `equipment-slot ${slot.className}`);
+        const location = { kind: "equipment", slot: slot.key };
+        attachDropHandlers(slotBox, location);
+        slotBox.appendChild(createElement("div", "equipment-slot-label", slot.label));
+        if (value) {
+          const itemChip = createElement("div", "inventory-item-chip");
+          itemChip.draggable = true;
+          itemChip.addEventListener("dragstart", (event) => startDrag(event, location));
+          itemChip.addEventListener("dragend", () => clearDragState());
+          if (sellMode && onSellInventoryItem) {
+            itemChip.classList.add("inventory-item-sellable");
+            itemChip.addEventListener("dblclick", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onSellInventoryItem(location);
+            });
+          }
+          itemChip.appendChild(createElement("div", "equipment-slot-value", display.name));
+          if (display.meta) {
+            itemChip.appendChild(createElement("div", "equipment-slot-meta", display.meta));
+          }
+          if (display.stats) {
+            itemChip.appendChild(createElement("div", "equipment-slot-stat", display.stats));
+          }
+          if (sellMode && getSellPrice) {
+            const sellPrice = Math.max(1, Math.floor(Number(getSellPrice(value) || 0)));
+            itemChip.appendChild(createElement("div", "inventory-sell-value", `Sell: ${sellPrice}g`));
+          }
+          slotBox.appendChild(itemChip);
+        } else {
+          slotBox.appendChild(createElement("div", "equipment-slot-value", display.name));
+        }
+        equipmentLayout.appendChild(slotBox);
+      });
+
+      equipmentSection.appendChild(equipmentLayout);
+      panel.appendChild(equipmentSection);
+
+      const storageSection = createElement("section", "inventory-section");
+      storageSection.appendChild(createElement("div", "skill-title", "Storage"));
+      storageSection.appendChild(
+        createElement(
+          "div",
+          "skill-subtitle",
+          sellMode
+            ? "Double-click a stored item to sell it. Sold items can be recovered from Merchant Buyback until your next run."
+            : "Items collected during your journey will appear here"
+        )
+      );
+
+      const storageTabsRow = createElement("div", "storage-tabs");
+      tabDefinitions.forEach((tab) => {
+        const button = createElement("button", "btn storage-tab-btn", tab.label);
+        button.type = "button";
+        if (tab.id === safeTabId) {
+          button.classList.add("active");
+        }
+        button.addEventListener("click", () => {
+          setActiveStorageTabId(character, tab.id);
+          renderSkillTreeTab();
+        });
+        storageTabsRow.appendChild(button);
+      });
+      storageSection.appendChild(storageTabsRow);
+
+      const slotsForTab = Array.isArray(storageTabs[safeTabId]) ? storageTabs[safeTabId] : [];
+      const storageGrid = createElement("div", "storage-grid");
+      for (let i = 0; i < 30; i += 1) {
+        const value = slotsForTab[i];
+        const slot = createElement("div", "storage-slot");
+        if (isRevealActive && revealState.tabId === safeTabId && revealState.index === i) {
+          slot.classList.add("storage-slot-reveal");
+          revealedSlotElement = slot;
+        }
+        const location = { kind: "storage", tabId: safeTabId, index: i };
+        attachDropHandlers(slot, location);
+        if (value) {
+          slot.classList.add("storage-slot-filled");
+          const display = getItemDisplay(value);
+          const itemChip = createElement("div", "inventory-item-chip");
+          itemChip.draggable = true;
+          itemChip.addEventListener("dragstart", (event) => startDrag(event, location));
+          itemChip.addEventListener("dragend", () => clearDragState());
+          if (sellMode && onSellInventoryItem) {
+            itemChip.classList.add("inventory-item-sellable");
+            itemChip.addEventListener("dblclick", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onSellInventoryItem(location);
+            });
+          }
+          itemChip.appendChild(createElement("div", "storage-slot-value", display.name));
+          if (display.meta) {
+            itemChip.appendChild(createElement("div", "storage-slot-meta", display.meta));
+          }
+          if (display.stats) {
+            itemChip.appendChild(createElement("div", "storage-slot-stat", display.stats));
+          }
+          if (sellMode && getSellPrice) {
+            const sellPrice = Math.max(1, Math.floor(Number(getSellPrice(value) || 0)));
+            itemChip.appendChild(createElement("div", "inventory-sell-value", `Sell: ${sellPrice}g`));
+          }
+          slot.appendChild(itemChip);
+        }
+        storageGrid.appendChild(slot);
+      }
+      storageSection.appendChild(storageGrid);
+      panel.appendChild(storageSection);
+
+      mountEl.appendChild(panel);
+      if (revealedSlotElement) {
+        setTimeout(() => {
+          revealedSlotElement.classList.remove("storage-slot-reveal");
+          revealedSlotElement.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+        }, 0);
+      }
+    }
+
+    function renderMerchantTab(character) {
+      if (!character) return;
+
+      const inventory = character.inventory || {};
+      const storageTabs = inventory.storageTabs || {};
+      const merchant = character.merchant || {};
+      const stock = Array.isArray(merchant.stock) ? merchant.stock : [];
+      const buyback = Array.isArray(merchant.buyback) ? merchant.buyback : [];
+      const refreshRuns = Math.max(1, Math.floor(Number(merchant.refreshRuns || 5)));
+      const runsSinceRefresh = Math.max(0, Math.floor(Number(merchant.runsSinceRefresh || 0)));
+      const runsUntilRefresh = Math.max(0, refreshRuns - runsSinceRefresh);
+      const levelLabel = merchant.levelLabel || `Level ${merchant.level || 1} Merchant`;
+      const activeMerchantTabId = getActiveMerchantTabId(character);
+      setActiveMerchantTabId(character, activeMerchantTabId);
+
+      const allStorageSlots = Object.values(storageTabs).reduce((list, slots) => {
+        if (!Array.isArray(slots)) return list;
+        return list.concat(slots);
+      }, []);
+      const freeStorageSlots = allStorageSlots.filter((slot) => !slot).length;
+      const storageFull = freeStorageSlots <= 0;
+
+      const rarityMap = window.RL_DATA.ITEM_RARITIES || {};
+      const itemTypes = window.RL_DATA.ITEM_TYPES || {};
+      const physicalTypes = window.RL_DATA.PHYSICAL_DAMAGE_TYPES || {};
+
+      const getStatText = (item) => {
+        const stats = item && item.stats && typeof item.stats === "object" ? item.stats : {};
+        return Object.entries(stats)
+          .map(([key, rawValue]) => {
+            const amount = Number(rawValue);
+            if (Number.isNaN(amount)) return "";
+            if (key === "slashingDamageBonus" || key === "meleeDamageBonus") return `+${amount} Slashing Damage`;
+            if (key === "piercingDamageBonus" || key === "rangedDamageBonus") return `+${amount} Piercing Damage`;
+            if (key === "bludgeoningDamageBonus") return `+${amount} Bludgeoning Damage`;
+            if (key === "armor") return `+${amount} Armor`;
+            const label = key.replace(/([A-Z])/g, " $1").replace(/_/g, " ");
+            const normalized = label.charAt(0).toUpperCase() + label.slice(1);
+            return `${amount >= 0 ? "+" : ""}${amount} ${normalized}`.trim();
+          })
+          .filter(Boolean)
+          .join(" | ");
+      };
+
+      const slotLabelMap = {
+        helmet: "Helmet",
+        chest: "Chest",
+        primaryMeleeWeapon: "Primary Melee",
+        secondaryMeleeWeapon: "Secondary Melee",
+        rangedWeapon: "Ranged",
+        ring1: "Ring 1",
+        ring2: "Ring 2",
+        amulet: "Amulet"
+      };
+
+      const panel = createElement("div", "merchant-panel");
+      panel.appendChild(createElement("div", "skill-title", "Merchant"));
+      panel.appendChild(createElement("div", "skill-subtitle", "Buy upgrades, sell inventory, and recover accidental sales."));
+
+      const summary = createElement("div", "merchant-summary");
+      summary.appendChild(createElement("div", "merchant-summary-item", `${levelLabel}`));
+      summary.appendChild(createElement("div", "merchant-summary-item", `Gold: ${character.gold || 0}`));
+      summary.appendChild(createElement("div", "merchant-summary-item", `Storage Free: ${freeStorageSlots}`));
+      summary.appendChild(createElement("div", "merchant-summary-item", `Refreshes every ${refreshRuns} runs`));
+      summary.appendChild(createElement("div", "merchant-summary-item", `Refresh in ${runsUntilRefresh} run${runsUntilRefresh === 1 ? "" : "s"}`));
+      panel.appendChild(summary);
+
+      const tabsRow = createElement("div", "merchant-mode-tabs");
+      [
+        { id: "buy", label: "Buy" },
+        { id: "sell", label: "Sell" }
+      ].forEach((tab) => {
+        const button = createElement("button", "btn merchant-mode-tab-btn", tab.label);
+        button.type = "button";
+        if (tab.id === activeMerchantTabId) {
+          button.classList.add("active");
+        }
+        button.addEventListener("click", () => {
+          setActiveMerchantTabId(character, tab.id);
+          renderSkillTreeTab();
+        });
+        tabsRow.appendChild(button);
+      });
+      panel.appendChild(tabsRow);
+
+      if (activeMerchantTabId === "sell") {
+        panel.appendChild(
+          createElement(
+            "div",
+            "skill-subtitle",
+            "Double-click any equipped or stored item to sell it. Sold items are available in Buyback until your next run."
+          )
+        );
+        renderInventoryTab(character, {
+          mountEl: panel,
+          sellMode: true,
+          onSellInventoryItem: (location) => {
+            if (!handlers.onSellInventoryItem) return;
+            handlers.onSellInventoryItem(location);
+          }
+        });
+        dom.skillTreeContent.appendChild(panel);
+        return;
+      }
+
+      const list = createElement("div", "merchant-grid");
+      if (!stock.length) {
+        const empty = createElement(
+          "div",
+          "merchant-empty",
+          runsUntilRefresh > 0
+            ? `Merchant stock is sold out. New stock in ${runsUntilRefresh} run${runsUntilRefresh === 1 ? "" : "s"}.`
+            : "Merchant stock is preparing to refresh."
+        );
+        list.appendChild(empty);
+      } else {
+        stock.forEach((listing) => {
+          const item = listing.item || {};
+          const rarity = rarityMap[item.rarity] || null;
+          const type = itemTypes[item.itemType] || null;
+          const physical = physicalTypes[item.physicalDamageType] || null;
+          const allowedSlots = Array.isArray(item.allowedSlots) ? item.allowedSlots : [];
+          const slotLabel = allowedSlots.length
+            ? allowedSlots.map((slot) => slotLabelMap[slot] || toTitle(slot)).join(", ")
+            : "-";
+          const stats = getStatText(item) || "-";
+          const weightValue = Number(item.weaponSlotWeight);
+          const weightLabel =
+            (item.itemType === "melee_weapon" || item.itemType === "ranged_weapon") && !Number.isNaN(weightValue)
+              ? `${Math.max(1, Math.min(2, Math.floor(weightValue)))} Slot${Math.floor(weightValue) === 1 ? "" : "s"}`
+              : "";
+
+          const card = createElement("article", "merchant-card");
+          if (item.rarity) {
+            card.classList.add(`merchant-rarity-${String(item.rarity).toLowerCase()}`);
+          }
+          card.appendChild(createElement("div", "merchant-item-name", item.name || "Item"));
+          card.appendChild(
+            createElement(
+              "div",
+              "merchant-item-meta",
+              [rarity ? rarity.label : "", type ? type.label : "", weightLabel].filter(Boolean).join(" | ")
+            )
+          );
+          card.appendChild(createElement("div", "merchant-item-line", `Slot: ${slotLabel}`));
+          if (physical && physical.label) {
+            card.appendChild(createElement("div", "merchant-item-line", `Damage Type: ${physical.label}`));
+          }
+          card.appendChild(createElement("div", "merchant-item-line", `Stats: ${stats}`));
+          card.appendChild(createElement("div", "merchant-price", `Price: ${listing.price || 0}g`));
+
+          const buyButton = createElement("button", "btn btn-primary merchant-buy-btn", "Buy");
+          buyButton.type = "button";
+          const hasGold = (character.gold || 0) >= (listing.price || 0);
+          buyButton.disabled = !hasGold || storageFull || !handlers.onBuyMerchantItem;
+          buyButton.addEventListener("click", () => {
+            if (!handlers.onBuyMerchantItem) return;
+            handlers.onBuyMerchantItem(listing.listingId);
+          });
+          card.appendChild(buyButton);
+
+          const reason = !hasGold
+            ? "Not enough gold"
+            : storageFull
+            ? "Storage is full"
+            : "";
+          if (reason) {
+            card.appendChild(createElement("div", "merchant-buy-reason", reason));
+          }
+
+          list.appendChild(card);
+        });
+      }
+
+      panel.appendChild(list);
+
+      const buybackSection = createElement("section", "merchant-buyback-section");
+      buybackSection.appendChild(createElement("div", "skill-title", "Buyback"));
+      buybackSection.appendChild(
+        createElement("div", "skill-subtitle", "Recover recently sold items. Buyback clears after each completed run.")
+      );
+
+      const buybackGrid = createElement("div", "merchant-grid");
+      if (!buyback.length) {
+        buybackGrid.appendChild(createElement("div", "merchant-empty", "No items available for buyback."));
+      } else {
+        buyback.forEach((listing) => {
+          const item = listing.item || {};
+          const rarity = rarityMap[item.rarity] || null;
+          const type = itemTypes[item.itemType] || null;
+          const physical = physicalTypes[item.physicalDamageType] || null;
+          const allowedSlots = Array.isArray(item.allowedSlots) ? item.allowedSlots : [];
+          const slotLabel = allowedSlots.length
+            ? allowedSlots.map((slot) => slotLabelMap[slot] || toTitle(slot)).join(", ")
+            : "-";
+          const stats = getStatText(item) || "-";
+          const weightValue = Number(item.weaponSlotWeight);
+          const weightLabel =
+            (item.itemType === "melee_weapon" || item.itemType === "ranged_weapon") && !Number.isNaN(weightValue)
+              ? `${Math.max(1, Math.min(2, Math.floor(weightValue)))} Slot${Math.floor(weightValue) === 1 ? "" : "s"}`
+              : "";
+
+          const card = createElement("article", "merchant-card");
+          if (item.rarity) {
+            card.classList.add(`merchant-rarity-${String(item.rarity).toLowerCase()}`);
+          }
+          card.appendChild(createElement("div", "merchant-item-name", item.name || "Item"));
+          card.appendChild(
+            createElement(
+              "div",
+              "merchant-item-meta",
+              [rarity ? rarity.label : "", type ? type.label : "", weightLabel].filter(Boolean).join(" | ")
+            )
+          );
+          card.appendChild(createElement("div", "merchant-item-line", `Slot: ${slotLabel}`));
+          if (physical && physical.label) {
+            card.appendChild(createElement("div", "merchant-item-line", `Damage Type: ${physical.label}`));
+          }
+          card.appendChild(createElement("div", "merchant-item-line", `Stats: ${stats}`));
+          card.appendChild(createElement("div", "merchant-price", `Buyback: ${listing.price || 0}g`));
+
+          const buybackButton = createElement("button", "btn merchant-buy-btn", "Buy Back");
+          buybackButton.type = "button";
+          const hasGold = (character.gold || 0) >= (listing.price || 0);
+          buybackButton.disabled = !hasGold || storageFull || !handlers.onBuybackMerchantItem;
+          buybackButton.addEventListener("click", () => {
+            if (!handlers.onBuybackMerchantItem) return;
+            handlers.onBuybackMerchantItem(listing.buybackId);
+          });
+          card.appendChild(buybackButton);
+
+          const reason = !hasGold
+            ? "Not enough gold"
+            : storageFull
+            ? "Storage is full"
+            : "";
+          if (reason) {
+            card.appendChild(createElement("div", "merchant-buy-reason", reason));
+          }
+
+          buybackGrid.appendChild(card);
+        });
+      }
+
+      buybackSection.appendChild(buybackGrid);
+      panel.appendChild(buybackSection);
+      dom.skillTreeContent.appendChild(panel);
+    }
+
+    function renderQuestsTab(character) {
+      if (!character) return;
+
+      const questsConfig = (window.RL_DATA && window.RL_DATA.QUESTS) || {};
+      const questDefinitions = Object.values(questsConfig).reduce((list, entry) => {
+        if (!Array.isArray(entry)) return list;
+        return list.concat(entry.filter((quest) => quest && typeof quest === "object" && quest.id));
+      }, []).filter((quest) => quest.availableFromStart !== false);
+
+      const panel = createElement("div", "quest-panel");
+      panel.appendChild(createElement("div", "skill-title", "Quests"));
+      panel.appendChild(
+        createElement(
+          "div",
+          "skill-subtitle",
+          "Complete long-term goals and claim rewards to unlock new run mechanics."
+        )
+      );
+
+      if (!questDefinitions.length) {
+        panel.appendChild(createElement("div", "skill-empty", "No quests available yet."));
+        dom.skillTreeContent.appendChild(panel);
+        return;
+      }
+
+      const claims = (character.questClaims && typeof character.questClaims === "object" ? character.questClaims : {});
+      const cards = createElement("div", "quest-list");
+
+      questDefinitions.forEach((quest) => {
+        const requirement = quest.requirement || {};
+        const target = Math.max(1, Math.floor(Number(requirement.target || 1)));
+        let current = 0;
+        let progressLabel = "Progress";
+        if (requirement.type === "legacy_xp_total") {
+          current = Math.max(0, Math.floor(Number(character.legacyXp || 0)));
+          progressLabel = "XP";
+        } else if (requirement.type === "total_gold_collected") {
+          current = Math.max(0, Math.floor(Number(character.lifetimeGoldCollected || 0)));
+          progressLabel = "Gold Collected";
+        } else if (requirement.type === "miniboss_kills_total") {
+          current = Math.max(0, Math.floor(Number(character.minibossKills || 0)));
+          progressLabel = "Minibosses Defeated";
+        } else if (requirement.type === "enemy_kills_total") {
+          current = Math.max(0, Math.floor(Number(character.enemyKills || 0)));
+          progressLabel = "Enemies Defeated";
+        } else if (requirement.type === "deaths_total") {
+          current = Math.max(0, Math.floor(Number(character.deaths || 0)));
+          progressLabel = "Deaths";
+        }
+        const progress = Math.min(target, current);
+        const progressPct = target > 0 ? (progress / target) * 100 : 0;
+        const completed = current >= target;
+        const claimed = claims[quest.id] === true;
+        const autoClaimOnComplete = Boolean(quest.reward && quest.reward.autoClaimOnComplete);
+
+        let statusText = "In Progress";
+        if (claimed) {
+          statusText = "Claimed";
+        } else if (completed) {
+          statusText = autoClaimOnComplete ? "Complete - Reward Applied" : "Complete - Reward Ready";
+        }
+
+        const card = createElement("article", "quest-card");
+        if (claimed) {
+          card.classList.add("quest-card-claimed");
+        } else if (completed) {
+          card.classList.add("quest-card-ready");
+        }
+
+        card.appendChild(createElement("div", "quest-title", quest.title || "Quest"));
+        card.appendChild(createElement("div", "quest-desc", quest.description || ""));
+        card.appendChild(
+          createElement("div", "quest-progress-text", `${progress} / ${target} ${progressLabel}`)
+        );
+
+        const track = createElement("div", "quest-progress-track");
+        const fill = createElement("div", "quest-progress-fill");
+        fill.style.width = `${progressPct.toFixed(1)}%`;
+        track.appendChild(fill);
+        card.appendChild(track);
+
+        const rewardLabel = (quest.reward && quest.reward.label) || "Reward";
+        card.appendChild(createElement("div", "quest-reward", `Reward: ${rewardLabel}`));
+        card.appendChild(createElement("div", "quest-status", `Status: ${statusText}`));
+
+        if (!claimed && !autoClaimOnComplete) {
+          const claimButton = createElement("button", "btn quest-claim-btn", "Claim Reward");
+          claimButton.type = "button";
+          claimButton.disabled = !completed || !handlers.onClaimQuestReward;
+          claimButton.addEventListener("click", () => {
+            if (!handlers.onClaimQuestReward) return;
+            handlers.onClaimQuestReward(quest.id);
+          });
+          card.appendChild(claimButton);
+        } else {
+          card.appendChild(createElement("div", "quest-claimed-note", "Reward unlocked"));
+        }
+
+        cards.appendChild(card);
+      });
+
+      panel.appendChild(cards);
+      dom.skillTreeContent.appendChild(panel);
+    }
+
+    function syncItemReferenceVisibility() {
+      if (dom.itemReferencePanel) {
+        setVisible(dom.itemReferencePanel, state.itemReferenceOpen);
+      }
+      if (dom.itemReferenceToggleBtn) {
+        dom.itemReferenceToggleBtn.textContent = state.itemReferenceOpen ? "Hide Info" : "Test Info";
+      }
+    }
+
+    function renderItemReferencePanel() {
+      if (!dom.itemReferenceContent) return;
+      const reference = window.RL_DATA.ITEM_REFERENCE_PANEL || {};
+      const weaponCatalog = Array.isArray(window.RL_DATA.WEAPON_CATALOG) ? window.RL_DATA.WEAPON_CATALOG : [];
+      const rarities = window.RL_DATA.ITEM_RARITIES || {};
+      const physicalTypes = window.RL_DATA.PHYSICAL_DAMAGE_TYPES || {};
+      const elementalTypes = window.RL_DATA.ELEMENTAL_DAMAGE_TYPES || {};
+
+      const getLabel = (map, id) => {
+        if (!id) return "";
+        const value = map[id];
+        return value && value.label ? value.label : toTitle(id);
+      };
+
+      const weaponRefsById = {};
+      (reference.weapons || []).forEach((weaponRef) => {
+        if (!weaponRef || !weaponRef.id) return;
+        weaponRefsById[weaponRef.id] = weaponRef;
+      });
+
+      const defaultRarityOrder = ["grey", "blue", "purple", "gold"];
+      const defaultTierProfiles = {
+        grey: {
+          valueRange: "Starter range (testing)",
+          optionalStats: ["Attack Speed", "Cooldown Reduction"]
+        },
+        blue: {
+          valueRange: "Improved range (testing)",
+          optionalStats: ["Attack Speed", "Cooldown Reduction", "Reach/Width/Speed"]
+        },
+        purple: {
+          valueRange: "Strong range (testing)",
+          optionalStats: ["Attack Speed", "Cooldown Reduction", "Reach/Width/Speed"],
+          elementalOptions: Array.isArray(reference.elementalOptions) ? reference.elementalOptions : []
+        },
+        gold: {
+          valueRange: "High range (testing)",
+          optionalStats: ["High stat budget", "Conditional bonuses", "Unique modifiers"],
+          elementalOptions: Array.isArray(reference.elementalOptions) ? reference.elementalOptions : []
+        }
+      };
+
+      const getWeightLabel = (weapon) => {
+        if (!weapon || !Array.isArray(weapon.slotWeightOptions) || !weapon.slotWeightOptions.length) return "1 Slot";
+        return weapon.slotWeightOptions
+          .map((weight) => `${weight} Slot${weight === 1 ? "" : "s"}`)
+          .join(" / ");
+      };
+
+      const weaponTypeFilters = ["all", ...Array.from(new Set(weaponCatalog.map((weapon) => weapon.weaponCategory).filter(Boolean)))];
+      if (!weaponTypeFilters.includes(state.itemReferenceWeaponTypeFilter)) {
+        state.itemReferenceWeaponTypeFilter = "all";
+      }
+
+      const filteredWeapons =
+        state.itemReferenceWeaponTypeFilter === "all"
+          ? weaponCatalog.slice()
+          : weaponCatalog.filter((weapon) => weapon.weaponCategory === state.itemReferenceWeaponTypeFilter);
+
+      dom.itemReferenceContent.innerHTML = "";
+
+      const intro = createElement("section", "item-ref-intro");
+      intro.appendChild(createElement("div", "item-ref-section-title", reference.title || "Item Reference"));
+      intro.appendChild(
+        createElement(
+          "div",
+          "item-ref-subtitle",
+          reference.subtitle || "Use weapon type filters below to inspect the current and planned catalog."
+        )
+      );
+      const raritySummary = (reference.supportedRarities || defaultRarityOrder)
+        .map((rarityId) => getLabel(rarities, rarityId))
+        .filter(Boolean)
+        .join(" | ");
+      intro.appendChild(createElement("div", "item-ref-subtitle", `Rarity Order: ${raritySummary}`));
+      dom.itemReferenceContent.appendChild(intro);
+
+      const filterSection = createElement("section", "item-ref-section");
+      filterSection.appendChild(createElement("div", "item-ref-section-title", "Weapon Type"));
+      const filterRow = createElement("div", "item-ref-filter-row");
+      weaponTypeFilters.forEach((filterId) => {
+        const button = createElement(
+          "button",
+          "btn item-ref-filter-btn",
+          filterId === "all" ? "All Weapons" : toTitle(filterId)
+        );
+        button.type = "button";
+        if (filterId === state.itemReferenceWeaponTypeFilter) {
+          button.classList.add("active");
+        }
+        button.addEventListener("click", () => {
+          state.itemReferenceWeaponTypeFilter = filterId;
+          renderItemReferencePanel();
+        });
+        filterRow.appendChild(button);
+      });
+      filterSection.appendChild(filterRow);
+      filterSection.appendChild(
+        createElement(
+          "div",
+          "item-ref-subtitle",
+          `Showing ${filteredWeapons.length} weapon${filteredWeapons.length === 1 ? "" : "s"} in this view.`
+        )
+      );
+      dom.itemReferenceContent.appendChild(filterSection);
+
+      const tableSection = createElement("section", "item-ref-section");
+      tableSection.appendChild(createElement("div", "item-ref-section-title", "Weapons and Stats Table"));
+      tableSection.appendChild(
+        createElement(
+          "div",
+          "item-ref-subtitle",
+          "Rows are grouped by rarity category for each weapon. Planned rows are placeholders for future drops."
+        )
+      );
+
+      const tableWrap = createElement("div", "item-ref-table-wrap");
+      const table = createElement("table", "item-ref-table");
+      const thead = createElement("thead", "");
+      const headerRow = createElement("tr", "");
+      [
+        "Category",
+        "Weapon Type",
+        "Weight",
+        "Damage Type",
+        "Damage Buff Range",
+        "Extra Stats Possible",
+        "Elemental Stats",
+        "Unique Stats"
+      ].forEach((heading) => {
+        const th = createElement("th", "", heading);
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      const tbody = createElement("tbody", "");
+      const normalizeRarityKey = (rarityValue) => String(rarityValue || "").toLowerCase().replace(/[^a-z]/g, "");
+      const rarityCellClass = (rarityValue) => {
+        const key = normalizeRarityKey(rarityValue);
+        if (key === "grey") return "item-ref-rarity-grey";
+        if (key === "blue") return "item-ref-rarity-blue";
+        if (key === "purple") return "item-ref-rarity-purple";
+        if (key === "gold") return "item-ref-rarity-gold";
+        if (key === "green") return "item-ref-rarity-green";
+        return "item-ref-rarity-unknown";
+      };
+      const optionalStatPercentRanges = {
+        grey: {
+          default: [2, 5],
+          attackSpeed: [2, 4],
+          throwRate: [2, 4],
+          cooldownReduction: [1, 3],
+          cleaveWidth: [3, 7],
+          meleeRange: [3, 7],
+          projectileSpeed: [4, 8],
+          projectileRange: [4, 8],
+          reachWidthSpeed: [3, 7],
+          highStatBudget: [6, 10],
+          conditionalBonuses: [4, 8],
+          uniqueModifiers: [3, 7]
+        },
+        blue: {
+          default: [5, 9],
+          attackSpeed: [4, 7],
+          throwRate: [4, 7],
+          cooldownReduction: [3, 5],
+          cleaveWidth: [7, 12],
+          meleeRange: [7, 12],
+          projectileSpeed: [8, 14],
+          projectileRange: [8, 14],
+          reachWidthSpeed: [7, 12],
+          highStatBudget: [10, 14],
+          conditionalBonuses: [8, 12],
+          uniqueModifiers: [6, 10]
+        },
+        purple: {
+          default: [9, 14],
+          attackSpeed: [7, 11],
+          throwRate: [7, 11],
+          cooldownReduction: [5, 8],
+          cleaveWidth: [12, 18],
+          meleeRange: [12, 18],
+          projectileSpeed: [14, 22],
+          projectileRange: [14, 22],
+          reachWidthSpeed: [12, 18],
+          highStatBudget: [14, 20],
+          conditionalBonuses: [12, 18],
+          uniqueModifiers: [10, 16]
+        },
+        gold: {
+          default: [14, 22],
+          attackSpeed: [11, 16],
+          throwRate: [11, 16],
+          cooldownReduction: [8, 12],
+          cleaveWidth: [18, 28],
+          meleeRange: [18, 28],
+          projectileSpeed: [22, 32],
+          projectileRange: [22, 32],
+          reachWidthSpeed: [18, 28],
+          highStatBudget: [20, 30],
+          conditionalBonuses: [18, 28],
+          uniqueModifiers: [15, 25]
+        },
+        green: {
+          default: [20, 32],
+          attackSpeed: [16, 24],
+          throwRate: [16, 24],
+          cooldownReduction: [12, 18],
+          cleaveWidth: [28, 40],
+          meleeRange: [28, 40],
+          projectileSpeed: [32, 46],
+          projectileRange: [32, 46],
+          reachWidthSpeed: [28, 40],
+          highStatBudget: [30, 44],
+          conditionalBonuses: [28, 40],
+          uniqueModifiers: [22, 34]
+        }
+      };
+      const getOptionalStatRangeKey = (statText) => {
+        const normalized = String(statText || "").toLowerCase();
+        if (normalized.includes("attack speed")) return "attackSpeed";
+        if (normalized.includes("throw rate")) return "throwRate";
+        if (normalized.includes("cooldown reduction")) return "cooldownReduction";
+        if (normalized.includes("cleave width")) return "cleaveWidth";
+        if (normalized.includes("melee range")) return "meleeRange";
+        if (normalized.includes("projectile speed")) return "projectileSpeed";
+        if (normalized.includes("projectile range")) return "projectileRange";
+        if (normalized.includes("reach/width/speed") || normalized.includes("reach width speed")) return "reachWidthSpeed";
+        if (normalized.includes("high stat budget")) return "highStatBudget";
+        if (normalized.includes("conditional bonuses")) return "conditionalBonuses";
+        if (normalized.includes("unique modifiers")) return "uniqueModifiers";
+        return "default";
+      };
+      const formatOptionalStatWithRange = (statText, rarityValue) => {
+        const raw = String(statText || "").trim();
+        if (!raw) return "";
+        if (raw.includes("%")) return raw;
+        const rarityKey = normalizeRarityKey(rarityValue);
+        const tierRanges = optionalStatPercentRanges[rarityKey] || optionalStatPercentRanges.grey;
+        const rangeKey = getOptionalStatRangeKey(raw);
+        const range = tierRanges[rangeKey] || tierRanges.default;
+        return `${raw} (+${range[0]}% to +${range[1]}%)`;
+      };
+      filteredWeapons.forEach((weapon) => {
+        const weaponRef = weaponRefsById[weapon.id] || null;
+        const rarityRows =
+          weaponRef && Array.isArray(weaponRef.rarityTiers) && weaponRef.rarityTiers.length
+            ? weaponRef.rarityTiers
+            : defaultRarityOrder.map((rarityId) => ({
+                rarity: rarityId,
+                valueRange: defaultTierProfiles[rarityId].valueRange,
+                optionalStats: defaultTierProfiles[rarityId].optionalStats,
+                elementalOptions: defaultTierProfiles[rarityId].elementalOptions
+              }));
+
+        const goldUniqueNotes =
+          weaponRef && Array.isArray(weaponRef.goldThemes) && weaponRef.goldThemes.length
+            ? weaponRef.goldThemes.join(", ")
+            : "Planned unique behavior";
+
+        rarityRows.forEach((tier) => {
+          const row = createElement("tr", "");
+          if (!weapon.availableInMvp) {
+            row.classList.add("item-ref-row-planned");
+          }
+          const rarityLabel = getLabel(rarities, tier.rarity || "") || toTitle(tier.rarity || "tier");
+          const weaponType = `${weapon.label || toTitle(weapon.id)} (${toTitle(weapon.weaponCategory || "unknown")})`;
+          const damageType = getLabel(physicalTypes, weapon.physicalDamageType || "");
+          const damageRange = tier.valueRange || "Planned";
+          const extraStats =
+            Array.isArray(tier.optionalStats) && tier.optionalStats.length
+              ? tier.optionalStats
+                  .map((statText) => formatOptionalStatWithRange(statText, tier.rarity))
+                  .filter(Boolean)
+                  .join("; ")
+              : "-";
+          const elementalStats =
+            Array.isArray(tier.elementalOptions) && tier.elementalOptions.length
+              ? tier.elementalOptions.map((id) => getLabel(elementalTypes, id)).join(", ")
+              : "-";
+          const uniqueStats = String(tier.rarity || "").toLowerCase() === "gold" ? goldUniqueNotes : "-";
+          const rarityCell = createElement("td", `item-ref-rarity-cell ${rarityCellClass(tier.rarity)}`, rarityLabel);
+          row.appendChild(rarityCell);
+          row.appendChild(createElement("td", "", weaponType));
+          row.appendChild(createElement("td", "", getWeightLabel(weapon)));
+          row.appendChild(createElement("td", "", damageType || "-"));
+          row.appendChild(createElement("td", "", damageRange));
+          row.appendChild(createElement("td", "", extraStats));
+          row.appendChild(createElement("td", "", elementalStats));
+          row.appendChild(createElement("td", "", uniqueStats));
+          tbody.appendChild(row);
+        });
+      });
+
+      if (!tbody.children.length) {
+        const row = createElement("tr", "");
+        const cell = createElement("td", "", "No weapons found for this type.");
+        cell.colSpan = 8;
+        row.appendChild(cell);
+        tbody.appendChild(row);
+      }
+
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      tableSection.appendChild(tableWrap);
+      dom.itemReferenceContent.appendChild(tableSection);
+    }
+
     function setHomeStatus(text) {
       dom.homeStatus.textContent = text;
     }
@@ -578,6 +1789,7 @@
       setVisible(dom.levelUpOverlay, false);
       setVisible(dom.pauseOverlay, false);
       setVisible(dom.endRunOverlay, false);
+      setVisible(dom.deleteCharacterOverlay, false);
     }
 
     function showGameScreen() {
@@ -586,15 +1798,31 @@
       setVisible(dom.levelUpOverlay, false);
       setVisible(dom.pauseOverlay, false);
       setVisible(dom.endRunOverlay, false);
+      setVisible(dom.deleteCharacterOverlay, false);
     }
 
     function updateHud(hud) {
+      const hpCurrent = Math.max(0, Math.ceil(hud.hp || 0));
+      const hpMax = Math.max(1, Math.ceil(hud.maxHp || 0));
       dom.hudName.textContent = hud.name || "-";
-      dom.hudHp.textContent = `HP: ${Math.max(0, Math.ceil(hud.hp || 0))}/${Math.ceil(hud.maxHp || 0)}`;
+      dom.hudHp.textContent = `HP: ${hpCurrent}/${hpMax}`;
+      dom.healthHudLabel.textContent = `HP: ${hpCurrent}/${hpMax}`;
       dom.hudLevel.textContent = `Level: ${hud.level || 1}`;
       dom.hudGold.textContent = `Gold: ${hud.gold || 0}`;
       dom.hudLegacy.textContent = `Legacy XP: ${hud.legacy || 0}`;
+      const rageCurrent = Math.max(0, Number(hud.rageCurrent || 0));
+      const rageMax = Math.max(1, Number(hud.rageMax || 100));
+      const rageActive = Boolean(hud.rageActive);
+      const rageSeconds = Math.max(0, Number(hud.rageSeconds || 0));
+      dom.hudRage.textContent = rageActive
+        ? `Rage: ${Math.floor(rageCurrent)}/${Math.floor(rageMax)} (Active ${rageSeconds.toFixed(1)}s)`
+        : `Rage: ${Math.floor(rageCurrent)}/${Math.floor(rageMax)}`;
       dom.hudTimer.textContent = formatTime(hud.time || 0);
+      const rageProgress = Math.max(0, Math.min(1, rageCurrent / rageMax));
+      dom.rageFill.style.width = `${(rageProgress * 100).toFixed(2)}%`;
+      dom.rageFill.classList.toggle("active", rageActive);
+      const hpProgress = Math.max(0, Math.min(1, hpCurrent / hpMax));
+      dom.healthFill.style.width = `${(hpProgress * 100).toFixed(2)}%`;
       const xpProgress = Math.max(0, Math.min(1, hud.xpProgress || 0));
       dom.xpFill.style.width = `${(xpProgress * 100).toFixed(2)}%`;
     }
@@ -657,6 +1885,7 @@
       setHomeStatus,
       renderCharacterList,
       renderCharacterDetails,
+      revealStorageLocation,
       updateHud,
       showLevelUp,
       hideLevelUp,
