@@ -4,10 +4,15 @@
       id: "grunt",
       label: "Raider",
       behavior: "chaser",
+      bountyLevel: 1,
+      bountyTarget: 60,
+      bountyRewardItemCount: 1,
       color: "#f06d6d",
       radius: 14,
       hp: 24,
       damage: 12,
+      resistances: ["slashing"],
+      weaknesses: ["piercing"],
       speed: 86,
       xpDrop: 8,
       goldChance: 0.18,
@@ -17,10 +22,15 @@
       id: "runner",
       label: "Skitter",
       behavior: "fast",
+      bountyLevel: 1,
+      bountyTarget: 70,
+      bountyRewardItemCount: 1,
       color: "#f6a35f",
       radius: 10,
       hp: 14,
       damage: 8,
+      resistances: [],
+      weaknesses: ["slashing"],
       speed: 132,
       xpDrop: 7,
       goldChance: 0.12,
@@ -30,10 +40,15 @@
       id: "shooter",
       label: "Hex Archer",
       behavior: "ranged",
+      bountyLevel: 1,
+      bountyTarget: 55,
+      bountyRewardItemCount: 1,
       color: "#a56cf2",
       radius: 12,
       hp: 22,
       damage: 10,
+      resistances: ["piercing"],
+      weaknesses: ["bludgeoning"],
       speed: 66,
       xpDrop: 12,
       goldChance: 0.22,
@@ -46,10 +61,15 @@
       id: "dasher",
       label: "Lancer",
       behavior: "dash",
+      bountyLevel: 1,
+      bountyTarget: 40,
+      bountyRewardItemCount: 1,
       color: "#65c8db",
       radius: 13,
       hp: 28,
       damage: 13,
+      resistances: ["piercing"],
+      weaknesses: ["bludgeoning"],
       speed: 88,
       xpDrop: 13,
       goldChance: 0.2,
@@ -62,10 +82,15 @@
       id: "miniboss",
       label: "War Captain",
       behavior: "miniboss",
+      bountyLevel: 1,
+      bountyTarget: 5,
+      bountyRewardItemCount: 2,
       color: "#f5c65d",
       radius: 28,
       hp: 620,
       damage: 20,
+      resistances: ["slashing", "piercing"],
+      weaknesses: ["bludgeoning"],
       speed: 64,
       xpDrop: 230,
       goldChance: 1,
@@ -78,10 +103,15 @@
       id: "finalBoss",
       label: "Abyss Tyrant",
       behavior: "finalBoss",
+      bountyLevel: 1,
+      bountyTarget: 1,
+      bountyRewardItemCount: 2,
       color: "#ff4972",
       radius: 42,
       hp: 4400,
       damage: 28,
+      resistances: ["fire", "poison"],
+      weaknesses: ["lightning"],
       speed: 72,
       xpDrop: 800,
       goldChance: 1,
@@ -105,6 +135,8 @@
     ranged_weapon: { id: "ranged_weapon", label: "Ranged Weapon" },
     helmet: { id: "helmet", label: "Helmet" },
     chest: { id: "chest", label: "Chest" },
+    leggings: { id: "leggings", label: "Leggings" },
+    boots: { id: "boots", label: "Boots" },
     ring: { id: "ring", label: "Ring" },
     amulet: { id: "amulet", label: "Amulet" }
   };
@@ -130,6 +162,37 @@
     chill: { id: "chill", label: "Chill" },
     poisoned: { id: "poisoned", label: "Poisoned" },
     corrode: { id: "corrode", label: "Corrode" }
+  };
+
+  const LEVELS = [
+    {
+      id: "level_1",
+      index: 1,
+      label: "Level 1",
+      subtitle: "Barbarian Last Stand"
+    }
+  ];
+
+  const BOUNTIES = {
+    defaultTarget: 50,
+    targetByBehavior: {
+      chaser: 60,
+      fast: 70,
+      ranged: 55,
+      dash: 40,
+      miniboss: 5,
+      finalBoss: 1
+    },
+    defaultRewardItemCount: 1,
+    rewardItemCountByBehavior: {
+      miniboss: 2,
+      finalBoss: 2
+    },
+    levelRewardRarity: {
+      1: "blue",
+      2: "purple",
+      3: "gold"
+    }
   };
 
   const WEAPON_CATALOG = [
@@ -312,6 +375,62 @@
             optionalStats: ["Strong conditionals", "Low-health survival effects", "Surrounded-by-enemies effects"]
           }
         ]
+      },
+      {
+        id: "leggings",
+        label: "Leggings",
+        slotLabel: "Leggings",
+        coreStats: ["Armor", "Health"],
+        rarityTiers: [
+          {
+            rarity: "grey",
+            valueRange: "Armor +1 to +3",
+            optionalStats: ["Health +3 to +7"]
+          },
+          {
+            rarity: "blue",
+            valueRange: "Armor +3 to +6",
+            optionalStats: ["Health +6 to +12", "Damage Reduction +1% to +2%"]
+          },
+          {
+            rarity: "purple",
+            valueRange: "Armor +6 to +9",
+            optionalStats: ["Health +12 to +18", "Mitigation support"]
+          },
+          {
+            rarity: "gold",
+            valueRange: "Armor +9 to +13",
+            optionalStats: ["Strong conditionals", "Low-health defense effects"]
+          }
+        ]
+      },
+      {
+        id: "boots",
+        label: "Boots",
+        slotLabel: "Boots",
+        coreStats: ["Move Speed", "Status Effect Resistance"],
+        rarityTiers: [
+          {
+            rarity: "grey",
+            valueRange: "Move Speed +2% to +4%",
+            optionalStats: ["Status Effect Resistance +4% to +8%"]
+          },
+          {
+            rarity: "blue",
+            valueRange: "Move Speed +4% to +7%",
+            optionalStats: ["Status Effect Resistance +8% to +12%"]
+          },
+          {
+            rarity: "purple",
+            valueRange: "Move Speed +7% to +10%",
+            optionalStats: ["Status Effect Resistance +12% to +18%"]
+          },
+          {
+            rarity: "gold",
+            valueRange: "Move Speed +10% to +14%",
+            optionalStats: ["Status Effect Resistance +18% to +24%", "Mobility conditionals"]
+          }
+        ]
       }
     ]
   };
@@ -368,6 +487,86 @@
         armor: 2
       }
     },
+    common_helmet: {
+      id: "common_helmet",
+      name: "Helm",
+      rarity: "grey",
+      itemType: "helmet",
+      itemCategory: "armor",
+      allowedSlot: "helmet",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 1,
+      merchantLevelMax: 1,
+      stats: {
+        armor: 1,
+        maxHpBonus: 4
+      }
+    },
+    common_leggings: {
+      id: "common_leggings",
+      name: "Leggings",
+      rarity: "grey",
+      itemType: "leggings",
+      itemCategory: "armor",
+      allowedSlot: "leggings",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 1,
+      merchantLevelMax: 1,
+      stats: {
+        armor: 2,
+        maxHpBonus: 6
+      }
+    },
+    common_boots: {
+      id: "common_boots",
+      name: "Boots",
+      rarity: "grey",
+      itemType: "boots",
+      itemCategory: "armor",
+      allowedSlot: "boots",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 1,
+      merchantLevelMax: 1,
+      stats: {
+        moveSpeedBonusPct: 4,
+        statusEffectResistPct: 8
+      }
+    },
+    common_ring: {
+      id: "common_ring",
+      name: "Ring",
+      rarity: "grey",
+      itemType: "ring",
+      itemCategory: "accessory",
+      allowedSlots: ["ring1", "ring2"],
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 1,
+      merchantLevelMax: 1,
+      stats: {
+        slashingDamageBonus: 1,
+        piercingDamageBonus: 1
+      }
+    },
+    common_amulet: {
+      id: "common_amulet",
+      name: "Amulet",
+      rarity: "grey",
+      itemType: "amulet",
+      itemCategory: "accessory",
+      allowedSlot: "amulet",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 1,
+      merchantLevelMax: 1,
+      stats: {
+        maxHpBonus: 4,
+        statusEffectResistPct: 4
+      }
+    },
     blue_axe: {
       id: "blue_axe",
       name: "Axe",
@@ -417,6 +616,86 @@
       merchantLevelMax: 1,
       stats: {
         armor: 5
+      }
+    },
+    blue_helmet: {
+      id: "blue_helmet",
+      name: "Helm",
+      rarity: "blue",
+      itemType: "helmet",
+      itemCategory: "armor",
+      allowedSlot: "helmet",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 1,
+      merchantLevelMax: 1,
+      stats: {
+        armor: 3,
+        maxHpBonus: 8
+      }
+    },
+    blue_leggings: {
+      id: "blue_leggings",
+      name: "Leggings",
+      rarity: "blue",
+      itemType: "leggings",
+      itemCategory: "armor",
+      allowedSlot: "leggings",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 1,
+      merchantLevelMax: 1,
+      stats: {
+        armor: 4,
+        maxHpBonus: 12
+      }
+    },
+    blue_boots: {
+      id: "blue_boots",
+      name: "Boots",
+      rarity: "blue",
+      itemType: "boots",
+      itemCategory: "armor",
+      allowedSlot: "boots",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 1,
+      merchantLevelMax: 1,
+      stats: {
+        moveSpeedBonusPct: 7,
+        statusEffectResistPct: 14
+      }
+    },
+    blue_ring: {
+      id: "blue_ring",
+      name: "Ring",
+      rarity: "blue",
+      itemType: "ring",
+      itemCategory: "accessory",
+      allowedSlots: ["ring1", "ring2"],
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 1,
+      merchantLevelMax: 1,
+      stats: {
+        slashingDamageBonus: 2,
+        piercingDamageBonus: 2
+      }
+    },
+    blue_amulet: {
+      id: "blue_amulet",
+      name: "Amulet",
+      rarity: "blue",
+      itemType: "amulet",
+      itemCategory: "accessory",
+      allowedSlot: "amulet",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 1,
+      merchantLevelMax: 1,
+      stats: {
+        maxHpBonus: 8,
+        statusEffectResistPct: 8
       }
     },
     purple_axe: {
@@ -469,6 +748,86 @@
       stats: {
         armor: 8
       }
+    },
+    purple_helmet: {
+      id: "purple_helmet",
+      name: "Helm",
+      rarity: "purple",
+      itemType: "helmet",
+      itemCategory: "armor",
+      allowedSlot: "helmet",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 2,
+      merchantLevelMax: 3,
+      stats: {
+        armor: 5,
+        maxHpBonus: 13
+      }
+    },
+    purple_leggings: {
+      id: "purple_leggings",
+      name: "Leggings",
+      rarity: "purple",
+      itemType: "leggings",
+      itemCategory: "armor",
+      allowedSlot: "leggings",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 2,
+      merchantLevelMax: 3,
+      stats: {
+        armor: 7,
+        maxHpBonus: 18
+      }
+    },
+    purple_boots: {
+      id: "purple_boots",
+      name: "Boots",
+      rarity: "purple",
+      itemType: "boots",
+      itemCategory: "armor",
+      allowedSlot: "boots",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 2,
+      merchantLevelMax: 3,
+      stats: {
+        moveSpeedBonusPct: 10,
+        statusEffectResistPct: 20
+      }
+    },
+    purple_ring: {
+      id: "purple_ring",
+      name: "Ring",
+      rarity: "purple",
+      itemType: "ring",
+      itemCategory: "accessory",
+      allowedSlots: ["ring1", "ring2"],
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 2,
+      merchantLevelMax: 3,
+      stats: {
+        slashingDamageBonus: 3,
+        piercingDamageBonus: 3
+      }
+    },
+    purple_amulet: {
+      id: "purple_amulet",
+      name: "Amulet",
+      rarity: "purple",
+      itemType: "amulet",
+      itemCategory: "accessory",
+      allowedSlot: "amulet",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 2,
+      merchantLevelMax: 3,
+      stats: {
+        maxHpBonus: 14,
+        statusEffectResistPct: 12
+      }
     }
   };
 
@@ -495,11 +854,11 @@
     },
     classRules: {
       barbarian: {
-        allowedItemTypes: ["melee_weapon", "ranged_weapon", "chest", "helmet", "ring", "amulet"],
+        allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "boots", "ring", "amulet"],
         varietyBuckets: {
           melee: ["melee_weapon"],
           ranged: ["ranged_weapon"],
-          armor: ["chest", "helmet"]
+          armor: ["helmet", "chest", "leggings", "boots", "ring", "amulet"]
         }
       }
     },
@@ -516,6 +875,8 @@
         melee_weapon: 16,
         ranged_weapon: 16,
         chest: 14,
+        leggings: 13,
+        boots: 11,
         helmet: 12,
         ring: 10,
         amulet: 12
@@ -528,7 +889,7 @@
     enabled: true,
     levelRules: {
       1: {
-        allowedItemTypes: ["melee_weapon", "ranged_weapon", "chest"]
+        allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "boots", "ring", "amulet"]
       }
     },
     sources: {
@@ -542,7 +903,7 @@
             blue: 0.26
           }
         },
-        allowedItemTypes: ["melee_weapon", "ranged_weapon", "chest"],
+        allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "boots", "ring", "amulet"],
         maxRarityByLevel: {
           1: "blue"
         }
@@ -558,7 +919,7 @@
             purple: 0.17
           }
         },
-        allowedItemTypes: ["melee_weapon", "ranged_weapon", "chest"],
+        allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "boots", "ring", "amulet"],
         maxRarityByLevel: {
           1: "purple"
         }
@@ -794,6 +1155,8 @@
       maxEnemyCount: 24,
       ringRadius: 220,
       ringRadiusGrowthPerMinute: 7,
+      spawnRadiusMultiplier: 2,
+      minRingRadius: 240,
       brokenRingChance: 0.56,
       brokenRingGapRadians: 1.05,
       speedMultiplier: 1.08,
@@ -811,8 +1174,11 @@
     enabled: true,
     minCount: 6,
     maxCount: 9,
-    minRadius: 22,
-    maxRadius: 44,
+    minWidth: 26,
+    maxWidth: 38,
+    minHeight: 44,
+    maxHeight: 68,
+    verticalBias: 0.58,
     minGap: 14,
     edgePadding: 30,
     minDistanceFromPlayerStart: 95,
@@ -1087,6 +1453,7 @@
           "Strength is the Barbarian-specific primary class attribute. Future classes will define their own class-specific primary attributes."
       }
     },
+    LEVELS,
     ITEM_RARITIES,
     ITEM_TYPES,
     PHYSICAL_DAMAGE_TYPES,
@@ -1098,6 +1465,7 @@
     LOOT_SYSTEM,
     QUESTS,
     POWERUPS,
+    BOUNTIES,
     WEAPON_CATALOG,
     ITEM_REFERENCE_PANEL,
     WEAPONS: {
@@ -1141,8 +1509,8 @@
       healthScalingPerMinute: 0.085,
       damageScalingPerMinute: 0.055,
       xpScalingPerMinute: 0.07,
-      goldPickupMultiplier: 0.65,
-      goldRewardPerSecond: 0.06,
+      goldPickupMultiplier: 0.5,
+      goldRewardPerSecond: 0.04,
       legacyPerMinute: 6
     },
     SWARM_EVENTS,

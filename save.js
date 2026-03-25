@@ -6,6 +6,8 @@
   const MERCHANT = window.RL_DATA.MERCHANT || {};
   const QUESTS = window.RL_DATA.QUESTS || {};
   const POWERUPS = window.RL_DATA.POWERUPS || {};
+  const BOUNTIES = window.RL_DATA.BOUNTIES || {};
+  const LEVELS = Array.isArray(window.RL_DATA.LEVELS) ? window.RL_DATA.LEVELS : [];
 
   function nowIso() {
     return new Date().toISOString();
@@ -72,6 +74,49 @@
       if (value === true) {
         result[featureId] = true;
       }
+    });
+    return result;
+  }
+
+  function normalizeBestiaryDiscoveries(rawDiscoveries) {
+    const result = {};
+    if (Array.isArray(rawDiscoveries)) {
+      rawDiscoveries.forEach((enemyTypeId) => {
+        const id = String(enemyTypeId || "").trim();
+        if (!id) return;
+        result[id] = true;
+      });
+      return result;
+    }
+    if (!rawDiscoveries || typeof rawDiscoveries !== "object") return result;
+    Object.entries(rawDiscoveries).forEach(([enemyTypeId, discovered]) => {
+      const id = String(enemyTypeId || "").trim();
+      if (!id || discovered !== true) return;
+      result[id] = true;
+    });
+    return result;
+  }
+
+  function normalizeEnemyKillCounts(rawCounts) {
+    const result = {};
+    if (!rawCounts || typeof rawCounts !== "object" || Array.isArray(rawCounts)) return result;
+    Object.entries(rawCounts).forEach(([enemyTypeId, value]) => {
+      const id = String(enemyTypeId || "").trim();
+      if (!id) return;
+      const numeric = Math.max(0, Math.floor(Number(value || 0)));
+      if (numeric <= 0) return;
+      result[id] = numeric;
+    });
+    return result;
+  }
+
+  function normalizeBountyClaims(rawClaims) {
+    const result = {};
+    if (!rawClaims || typeof rawClaims !== "object" || Array.isArray(rawClaims)) return result;
+    Object.entries(rawClaims).forEach(([enemyTypeId, claimed]) => {
+      const id = String(enemyTypeId || "").trim();
+      if (!id || claimed !== true) return;
+      result[id] = true;
     });
     return result;
   }
@@ -164,6 +209,8 @@
     if (itemType === "ranged_weapon") return ["rangedWeapon"];
     if (itemType === "helmet") return ["helmet"];
     if (itemType === "chest") return ["chest"];
+    if (itemType === "leggings") return ["leggings"];
+    if (itemType === "boots") return ["boots"];
     if (itemType === "ring") return ["ring1", "ring2"];
     if (itemType === "amulet") return ["amulet"];
     return [];
@@ -295,6 +342,59 @@
     });
   }
 
+  function getBountyProfileForEnemy(enemyTypeId) {
+    const normalizedEnemyTypeId = String(enemyTypeId || "").trim();
+    if (!normalizedEnemyTypeId) return null;
+    const enemyDefinitions = window.RL_DATA.ENEMIES || {};
+    const enemy = enemyDefinitions[normalizedEnemyTypeId];
+    if (!enemy || typeof enemy !== "object") return null;
+
+    const targetByBehavior = (BOUNTIES && BOUNTIES.targetByBehavior) || {};
+    const rewardItemCountByBehavior = (BOUNTIES && BOUNTIES.rewardItemCountByBehavior) || {};
+    const levelRewardRarity = (BOUNTIES && BOUNTIES.levelRewardRarity) || { 1: "blue" };
+    const parsedDefaultTarget = Number(BOUNTIES && BOUNTIES.defaultTarget);
+    const defaultTarget = Number.isNaN(parsedDefaultTarget) ? 50 : Math.max(1, Math.floor(parsedDefaultTarget));
+    const parsedDefaultRewardCount = Number(BOUNTIES && BOUNTIES.defaultRewardItemCount);
+    const defaultRewardItemCount = Number.isNaN(parsedDefaultRewardCount)
+      ? 1
+      : Math.max(1, Math.floor(parsedDefaultRewardCount));
+
+    const parsedLevel = Number(enemy.bountyLevel || enemy.level || 1);
+    const level = Number.isNaN(parsedLevel) ? 1 : Math.max(1, Math.floor(parsedLevel));
+    const rewardRarity = String(levelRewardRarity[level] || levelRewardRarity[1] || "blue").trim().toLowerCase() || "blue";
+
+    const behavior = String(enemy.behavior || "").trim();
+    const behaviorTarget = Number(targetByBehavior[behavior]);
+    const target = Math.max(
+      1,
+      Math.floor(
+        Number(enemy.bountyTarget) ||
+          (Number.isNaN(behaviorTarget) ? defaultTarget : behaviorTarget) ||
+          defaultTarget
+      )
+    );
+
+    const behaviorRewardCount = Number(rewardItemCountByBehavior[behavior]);
+    const rewardItemCount = Math.max(
+      1,
+      Math.floor(
+        Number(enemy.bountyRewardItemCount) ||
+          (Number.isNaN(behaviorRewardCount) ? defaultRewardItemCount : behaviorRewardCount) ||
+          defaultRewardItemCount
+      )
+    );
+
+    return {
+      enemyTypeId: normalizedEnemyTypeId,
+      enemyLabel: enemy.label || normalizedEnemyTypeId,
+      behavior,
+      level,
+      target,
+      rewardRarity,
+      rewardItemCount
+    };
+  }
+
   function getMerchantRefreshRuns() {
     const configured = Number(MERCHANT.refreshRuns);
     if (Number.isNaN(configured)) return 5;
@@ -311,6 +411,29 @@
     const configured = Number(MERCHANT.defaultProgressionLevel);
     if (Number.isNaN(configured)) return 1;
     return Math.max(1, Math.floor(configured));
+  }
+
+  function getConfiguredMaxRunLevel() {
+    if (!Array.isArray(LEVELS) || !LEVELS.length) return 1;
+    let maxLevel = 1;
+    LEVELS.forEach((level) => {
+      const parsed = Math.max(1, Math.floor(Number(level && level.index)));
+      if (!Number.isNaN(parsed)) {
+        maxLevel = Math.max(maxLevel, parsed);
+      }
+    });
+    return maxLevel;
+  }
+
+  function normalizeHighestUnlockedLevel(value) {
+    const parsed = Number(value);
+    const maxLevel = getConfiguredMaxRunLevel();
+    if (Number.isNaN(parsed)) return 1;
+    return clampToRange(Math.max(1, Math.floor(parsed)), 1, maxLevel);
+  }
+
+  function clampToRange(value, min, max) {
+    return Math.max(min, Math.min(max, value));
   }
 
   function normalizeProgressionLevel(levelValue) {
@@ -338,11 +461,11 @@
     const rule = rules[classId];
     if (rule && typeof rule === "object") return rule;
     return {
-      allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "ring", "amulet"],
+      allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "boots", "ring", "amulet"],
       varietyBuckets: {
         melee: ["melee_weapon"],
         ranged: ["ranged_weapon"],
-        armor: ["helmet", "chest"]
+        armor: ["helmet", "chest", "leggings", "boots", "ring", "amulet"]
       }
     };
   }
@@ -356,6 +479,8 @@
         melee_weapon: 16,
         ranged_weapon: 16,
         chest: 14,
+        leggings: 13,
+        boots: 11,
         helmet: 12,
         ring: 10,
         amulet: 12
@@ -722,6 +847,8 @@
       equipment: {
         helmet: null,
         chest: null,
+        leggings: null,
+        boots: null,
         primaryMeleeWeapon: null,
         secondaryMeleeWeapon: null,
         rangedWeapon: null,
@@ -767,6 +894,8 @@
       equipment: {
         helmet: cloneItem(normalized.equipment.helmet),
         chest: cloneItem(normalized.equipment.chest),
+        leggings: cloneItem(normalized.equipment.leggings),
+        boots: cloneItem(normalized.equipment.boots),
         primaryMeleeWeapon: cloneItem(normalized.equipment.primaryMeleeWeapon),
         secondaryMeleeWeapon: cloneItem(normalized.equipment.secondaryMeleeWeapon),
         rangedWeapon: cloneItem(normalized.equipment.rangedWeapon),
@@ -899,6 +1028,8 @@
     const equipmentEntries = [
       { slotKey: "helmet", item: rawEquipment.helmet },
       { slotKey: "chest", item: rawEquipment.chest },
+      { slotKey: "leggings", item: rawEquipment.leggings },
+      { slotKey: "boots", item: rawEquipment.boots },
       { slotKey: "primaryMeleeWeapon", item: rawEquipment.primaryMeleeWeapon },
       { slotKey: "secondaryMeleeWeapon", item: rawEquipment.secondaryMeleeWeapon },
       { slotKey: "rangedWeapon", item: rawEquipment.rangedWeapon },
@@ -1092,6 +1223,13 @@
       unlockedState.features = withReward.features;
     });
     const merchantUnlocked = unlockedState.features.merchant === true;
+    const bestiaryDiscoveries = normalizeBestiaryDiscoveries(
+      raw.bestiaryDiscoveries || raw.bestiary || raw.enemyCodex || raw.enemyDiscoveries
+    );
+    const enemyKillCounts = normalizeEnemyKillCounts(
+      raw.enemyKillCounts || raw.killsByEnemy || raw.enemyTypeKills
+    );
+    const bountyClaims = normalizeBountyClaims(raw.bountyClaims || raw.claimedBounties);
 
     return {
       id: raw.id,
@@ -1115,6 +1253,10 @@
       unlockedPickups: unlockedState.pickups,
       unlockedFeatures: unlockedState.features,
       merchantUnlocked,
+      bestiaryDiscoveries,
+      enemyKillCounts,
+      bountyClaims,
+      highestUnlockedLevel: normalizeHighestUnlockedLevel(raw.highestUnlockedLevel || raw.maxUnlockedLevel || 1),
       inventory,
       merchant,
       bestSurvivalTime: Number(raw.bestSurvivalTime || 0),
@@ -1189,6 +1331,10 @@
       legacyXp: 0,
       attributeLevels: {},
       inventory: createStarterInventory("barbarian", characterId),
+      bestiaryDiscoveries: {},
+      enemyKillCounts: {},
+      bountyClaims: {},
+      highestUnlockedLevel: 1,
       bestSurvivalTime: 0,
       runsPlayed: 0,
       minibossKills: 0,
@@ -1387,27 +1533,172 @@
     }
   }
 
+  function mergeEnemyKillCounts(baseCounts, earnedCounts) {
+    const merged = normalizeEnemyKillCounts(baseCounts);
+    const gained = normalizeEnemyKillCounts(earnedCounts);
+    Object.entries(gained).forEach(([enemyTypeId, amount]) => {
+      merged[enemyTypeId] = Math.max(0, Math.floor(Number(merged[enemyTypeId] || 0))) + Math.max(0, Math.floor(Number(amount || 0)));
+    });
+    return merged;
+  }
+
   function applyRunRewards(characterId, runSummary) {
     return updateCharacter(characterId, (current) => {
+      const summary = runSummary && typeof runSummary === "object" ? runSummary : {};
       const progressionLevel = normalizeProgressionLevel(current.progressionLevel);
       const merchant = incrementMerchantRunCounter(current.merchant, {
         classId: current.classId,
         characterId: current.id,
         progressionLevel
       });
+      const currentUnlockedLevel = normalizeHighestUnlockedLevel(current.highestUnlockedLevel || 1);
+      const rawCompletedLevelNumber = Number(summary.completedLevelNumber);
+      const completedLevelNumber = Number.isNaN(rawCompletedLevelNumber) ? 1 : Math.max(1, Math.floor(rawCompletedLevelNumber));
+      const unlockedByVictory = summary.victory === true ? completedLevelNumber + 1 : currentUnlockedLevel;
       return {
         progressionLevel,
         merchant,
-        gold: current.gold + (runSummary.goldEarned || 0),
-        lifetimeGoldCollected: Math.max(0, Math.floor(Number(current.lifetimeGoldCollected || 0))) + Math.max(0, Math.floor(Number(runSummary.goldEarned || 0))),
-        legacyXp: current.legacyXp + (runSummary.legacyXpEarned || 0),
-        bestSurvivalTime: Math.max(current.bestSurvivalTime, runSummary.timeSurvived || 0),
+        highestUnlockedLevel: normalizeHighestUnlockedLevel(Math.max(currentUnlockedLevel, unlockedByVictory)),
+        gold: current.gold + (summary.goldEarned || 0),
+        lifetimeGoldCollected: Math.max(0, Math.floor(Number(current.lifetimeGoldCollected || 0))) + Math.max(0, Math.floor(Number(summary.goldEarned || 0))),
+        legacyXp: current.legacyXp + (summary.legacyXpEarned || 0),
+        enemyKillCounts: mergeEnemyKillCounts(current.enemyKillCounts, summary.enemyKillsByType),
+        bestSurvivalTime: Math.max(current.bestSurvivalTime, summary.timeSurvived || 0),
         runsPlayed: current.runsPlayed + 1,
-        minibossKills: current.minibossKills + (runSummary.minibossesDefeated || 0),
-        enemyKills: current.enemyKills + (runSummary.enemiesKilled || 0),
-        deaths: current.deaths + (runSummary.deaths || 0)
+        minibossKills: current.minibossKills + (summary.minibossesDefeated || 0),
+        enemyKills: current.enemyKills + (summary.enemiesKilled || 0),
+        deaths: current.deaths + (summary.deaths || 0)
       };
     });
+  }
+
+  function markBestiaryEncounter(characterId, enemyTypeId) {
+    const normalizedEnemyTypeId = String(enemyTypeId || "").trim();
+    if (!normalizedEnemyTypeId) {
+      return { ok: false, error: "Invalid enemy type." };
+    }
+    const enemyDefinitions = window.RL_DATA.ENEMIES || {};
+    if (!enemyDefinitions[normalizedEnemyTypeId]) {
+      return { ok: false, error: "Enemy type not found." };
+    }
+
+    const current = getCharacter(characterId);
+    if (!current) {
+      return { ok: false, error: "Character not found." };
+    }
+    const existingDiscoveries = normalizeBestiaryDiscoveries(current.bestiaryDiscoveries);
+    if (existingDiscoveries[normalizedEnemyTypeId]) {
+      return {
+        ok: true,
+        discovered: false,
+        enemyTypeId: normalizedEnemyTypeId,
+        character: current
+      };
+    }
+
+    const updated = updateCharacter(characterId, (character) => {
+      const currentDiscoveries = normalizeBestiaryDiscoveries(character.bestiaryDiscoveries);
+      if (currentDiscoveries[normalizedEnemyTypeId]) return {};
+      return {
+        bestiaryDiscoveries: {
+          ...currentDiscoveries,
+          [normalizedEnemyTypeId]: true
+        }
+      };
+    });
+
+    if (!updated) {
+      return { ok: false, error: "Character not found." };
+    }
+    return {
+      ok: true,
+      discovered: true,
+      enemyTypeId: normalizedEnemyTypeId,
+      character: updated
+    };
+  }
+
+  function claimBountyReward(characterId, enemyTypeId) {
+    const normalizedEnemyTypeId = String(enemyTypeId || "").trim();
+    if (!normalizedEnemyTypeId) {
+      return { ok: false, error: "Invalid bounty target." };
+    }
+    const profile = getBountyProfileForEnemy(normalizedEnemyTypeId);
+    if (!profile) {
+      return { ok: false, error: "Bounty target not found." };
+    }
+
+    let claim = null;
+    try {
+      const updated = updateCharacter(characterId, (current) => {
+        const discovered = normalizeBestiaryDiscoveries(current.bestiaryDiscoveries);
+        if (!discovered[normalizedEnemyTypeId]) {
+          throw new Error("Discover this enemy in the Bestiary first.");
+        }
+
+        const claims = normalizeBountyClaims(current.bountyClaims);
+        if (claims[normalizedEnemyTypeId] === true) {
+          throw new Error("Bounty already claimed.");
+        }
+
+        const killCounts = normalizeEnemyKillCounts(current.enemyKillCounts);
+        const currentKills = Math.max(0, Math.floor(Number(killCounts[normalizedEnemyTypeId] || 0)));
+        if (currentKills < profile.target) {
+          throw new Error("Bounty requirement is not complete yet.");
+        }
+
+        const eligibleDefinitions = getEligibleQuestRewardDefinitions(current.classId, profile.rewardRarity);
+        if (!eligibleDefinitions.length) {
+          throw new Error("No eligible bounty reward items are configured.");
+        }
+
+        const inventory = cloneInventory(current.inventory);
+        const grantedItems = [];
+        for (let i = 0; i < profile.rewardItemCount; i += 1) {
+          const randomIndex = Math.floor(Math.random() * eligibleDefinitions.length);
+          const definition =
+            eligibleDefinitions[Math.max(0, Math.min(eligibleDefinitions.length - 1, randomIndex))];
+          const grantedItem = createItemInstance(definition.id, current.id);
+          if (!grantedItem) continue;
+          const insertedLocation = insertItemIntoFirstStorageSlot(inventory, grantedItem);
+          if (!insertedLocation) {
+            throw new Error("Storage is full. Make room before claiming this bounty.");
+          }
+          grantedItems.push(grantedItem);
+        }
+        if (!grantedItems.length) {
+          throw new Error("Could not generate bounty reward item.");
+        }
+
+        const nextClaims = {
+          ...claims,
+          [normalizedEnemyTypeId]: true
+        };
+
+        const rarityLabel = profile.rewardRarity.charAt(0).toUpperCase() + profile.rewardRarity.slice(1);
+        claim = {
+          enemyTypeId: normalizedEnemyTypeId,
+          enemyLabel: profile.enemyLabel || normalizedEnemyTypeId,
+          target: profile.target,
+          rewardLabel: `${grantedItems.length} ${rarityLabel} item${grantedItems.length === 1 ? "" : "s"}`
+        };
+
+        return {
+          inventory,
+          bountyClaims: nextClaims
+        };
+      });
+
+      if (!updated) {
+        return { ok: false, error: "Character not found." };
+      }
+      return { ok: true, character: updated, claim };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error && error.message ? error.message : "Could not claim bounty reward."
+      };
+    }
   }
 
   function purchaseMerchantItem(characterId, listingId) {
@@ -1671,16 +1962,19 @@
     updateCharacter,
     applyRunRewards,
     claimQuestReward,
+    claimBountyReward,
     moveInventoryItem,
     purchaseMerchantItem,
     sellInventoryItem,
     buybackMerchantItem,
+    markBestiaryEncounter,
     storeItemInStorage,
     spendAttributePoint,
     spendClassSkillPoint,
     xpRequiredForNextLegacyLevel,
     calculateLegacyProgress,
     calculateMerchantSellPrice,
-    getRunsUntilMerchantRefresh
+    getRunsUntilMerchantRefresh,
+    getBountyProfileForEnemy
   });
 })();

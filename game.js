@@ -106,6 +106,7 @@
 
       this.characters = [];
       this.selectedCharacterId = null;
+      this.selectedLevelId = null;
       this.currentRun = null;
       this.previousTime = performance.now();
       this.entityIds = 1;
@@ -115,15 +116,38 @@
         mouseX: 0,
         mouseY: 0
       };
+      this.obstacleSprites = this.createObstacleSprites();
+      this.chestSprites = this.createChestSprites();
 
       this.boundLoop = this.loop.bind(this);
       this.boundResize = this.handleResize.bind(this);
+    }
+
+    createObstacleSprites() {
+      if (typeof Image === "undefined") return [];
+      const spritePaths = ["assets/obstacles/barrier-slab-a.svg", "assets/obstacles/barrier-slab-b.svg"];
+      return spritePaths.map((path) => {
+        const image = new Image();
+        image.src = path;
+        return image;
+      });
+    }
+
+    createChestSprites() {
+      if (typeof Image === "undefined") return [];
+      const spritePaths = ["assets/pickups/chest-closed.svg", "assets/pickups/chest-open.svg"];
+      return spritePaths.map((path) => {
+        const image = new Image();
+        image.src = path;
+        return image;
+      });
     }
 
     init() {
       this.ui.init({
         onCreateCharacter: (name) => this.handleCreateCharacter(name),
         onSelectCharacter: (id) => this.handleSelectCharacter(id),
+        onSelectLevel: (levelId) => this.handleSelectLevel(levelId),
         onDeleteCharacter: (characterId) => this.handleDeleteCharacter(characterId),
         onStartRun: () => this.startRunFromSelection(),
         onChooseUpgrade: (upgradeId) => this.chooseUpgrade(upgradeId),
@@ -133,6 +157,7 @@
         onSellInventoryItem: (location) => this.handleSellInventoryItem(location),
         onBuybackMerchantItem: (buybackId) => this.handleBuybackMerchantItem(buybackId),
         onClaimQuestReward: (questId) => this.handleClaimQuestReward(questId),
+        onClaimBountyReward: (enemyTypeId) => this.handleClaimBountyReward(enemyTypeId),
         onResume: () => this.resumeRun(),
         onRestart: () => this.restartRun(),
         onReturnHome: () => this.returnHome(),
@@ -197,6 +222,7 @@
       this.characters = SAVE.listCharacters();
       if (!this.characters.length) {
         this.selectedCharacterId = null;
+        this.selectedLevelId = null;
         this.ui.renderCharacterList([], null);
         this.ui.renderCharacterDetails(null);
         this.ui.setHomeStatus("Create a Human Barbarian to begin your first run.");
@@ -211,11 +237,13 @@
       this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
       const selected = this.getSelectedCharacter();
       if (selected) {
-        this.ui.renderCharacterDetails(selected, { resetTab: true });
+        const selectedLevel = this.resolveSelectedLevelForCharacter(selected);
+        this.ui.renderCharacterDetails(selected, { resetTab: true, selectedLevelId: selectedLevel.id });
         const best = formatTime(selected.bestSurvivalTime || 0);
+        const levelLabel = selectedLevel && selectedLevel.label ? selectedLevel.label : "Level 1";
         const message = initialLoad
-          ? `Selected ${selected.name}. Best survival: ${best}.`
-          : `${selected.name} ready. Gold ${selected.gold}, Legacy XP ${selected.legacyXp}.`;
+          ? `Selected ${selected.name}. ${levelLabel} ready. Best survival: ${best}.`
+          : `${selected.name} ready on ${levelLabel}. Gold ${selected.gold}, Legacy XP ${selected.legacyXp}.`;
         this.ui.setHomeStatus(message);
       }
       this.ui.showHomeScreen();
@@ -223,6 +251,67 @@
 
     getSelectedCharacter() {
       return this.characters.find((character) => character.id === this.selectedCharacterId) || null;
+    }
+
+    getLevelDefinitions() {
+      const configured = Array.isArray(DATA.LEVELS) ? DATA.LEVELS : [];
+      const normalized = configured
+        .map((level) => {
+          if (!level || typeof level !== "object") return null;
+          const index = Math.max(1, Math.floor(Number(level.index || 1)));
+          return {
+            id: String(level.id || `level_${index}`),
+            index,
+            label: String(level.label || `Level ${index}`),
+            subtitle: String(level.subtitle || "")
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.index - b.index);
+      if (normalized.length) return normalized;
+      return [{ id: "level_1", index: 1, label: "Level 1", subtitle: "" }];
+    }
+
+    getAvailableLevelsForCharacter(character) {
+      const levels = this.getLevelDefinitions();
+      if (!character) return [levels[0]];
+      const highestUnlockedLevel = Math.max(1, Math.floor(Number(character.highestUnlockedLevel || 1)));
+      const unlocked = levels.filter((level) => level.index <= highestUnlockedLevel);
+      return unlocked.length ? unlocked : [levels[0]];
+    }
+
+    resolveSelectedLevelForCharacter(character, preferredLevelId) {
+      const available = this.getAvailableLevelsForCharacter(character);
+      const requestedId =
+        typeof preferredLevelId === "string" && preferredLevelId.trim().length
+          ? preferredLevelId.trim()
+          : this.selectedLevelId;
+      const selected = available.find((level) => level.id === requestedId) || available[0];
+      this.selectedLevelId = selected.id;
+      return selected;
+    }
+
+    getCharacterBestiaryDiscoverySet(character) {
+      const discovered = (character && character.bestiaryDiscoveries) || {};
+      const knownIds = Object.keys(discovered).filter((enemyTypeId) => discovered[enemyTypeId] === true);
+      return new Set(knownIds);
+    }
+
+    markEnemyEncountered(enemyTypeId) {
+      const run = this.currentRun;
+      if (!run) return;
+      const normalizedTypeId = String(enemyTypeId || "").trim();
+      if (!normalizedTypeId) return;
+      if (!run.bestiaryDiscoveries) {
+        run.bestiaryDiscoveries = new Set();
+      }
+      if (run.bestiaryDiscoveries.has(normalizedTypeId)) return;
+      run.bestiaryDiscoveries.add(normalizedTypeId);
+      if (!SAVE.markBestiaryEncounter) return;
+      const result = SAVE.markBestiaryEncounter(run.characterId, normalizedTypeId);
+      if (result && result.ok && result.discovered) {
+        run.stats.newBestiaryEntries = Math.max(0, Number(run.stats.newBestiaryEntries || 0)) + 1;
+      }
     }
 
     handleCreateCharacter(name) {
@@ -249,9 +338,21 @@
       this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
       const selected = this.getSelectedCharacter();
       if (selected) {
-        this.ui.renderCharacterDetails(selected, { resetTab: true });
-        this.ui.setHomeStatus(`Selected ${selected.name}. Press Start Run when ready.`);
+        const selectedLevel = this.resolveSelectedLevelForCharacter(selected);
+        this.ui.renderCharacterDetails(selected, { resetTab: true, selectedLevelId: selectedLevel.id });
+        this.ui.setHomeStatus(`Selected ${selected.name}. ${selectedLevel.label} ready. Press Start Run when ready.`);
       }
+    }
+
+    handleSelectLevel(levelId) {
+      const selectedCharacter = this.getSelectedCharacter();
+      if (!selectedCharacter) return;
+      const selectedLevel = this.resolveSelectedLevelForCharacter(selectedCharacter, levelId);
+      this.ui.renderCharacterDetails(selectedCharacter, {
+        resetTab: false,
+        selectedLevelId: selectedLevel.id
+      });
+      this.ui.setHomeStatus(`Selected ${selectedCharacter.name}. ${selectedLevel.label} ready.`);
     }
 
     handleDeleteCharacter(characterId) {
@@ -284,7 +385,8 @@
       const updated = this.getSelectedCharacter();
       this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
       if (updated) {
-        this.ui.renderCharacterDetails(updated, { resetTab: false });
+        const selectedLevel = this.resolveSelectedLevelForCharacter(updated);
+        this.ui.renderCharacterDetails(updated, { resetTab: false, selectedLevelId: selectedLevel.id });
         this.ui.setHomeStatus(
           `${updated.name} is Legacy Lv.${updated.legacyLevel} with ${updated.attributePoints || 0} attribute points remaining.`
         );
@@ -305,7 +407,8 @@
         const refreshed = this.getSelectedCharacter();
         this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
         if (refreshed) {
-          this.ui.renderCharacterDetails(refreshed, { resetTab: false });
+          const selectedLevel = this.resolveSelectedLevelForCharacter(refreshed);
+          this.ui.renderCharacterDetails(refreshed, { resetTab: false, selectedLevelId: selectedLevel.id });
         }
       } catch (error) {
         this.ui.setHomeStatus(error && error.message ? error.message : "Invalid inventory move.");
@@ -328,7 +431,8 @@
       const refreshed = this.getSelectedCharacter();
       this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
       if (refreshed) {
-        this.ui.renderCharacterDetails(refreshed, { resetTab: false });
+        const selectedLevel = this.resolveSelectedLevelForCharacter(refreshed);
+        this.ui.renderCharacterDetails(refreshed, { resetTab: false, selectedLevelId: selectedLevel.id });
         if (storageLocation && this.ui.revealStorageLocation) {
           this.ui.revealStorageLocation(refreshed, storageLocation);
         }
@@ -370,7 +474,8 @@
       const refreshed = this.getSelectedCharacter();
       this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
       if (refreshed) {
-        this.ui.renderCharacterDetails(refreshed, { resetTab: false });
+        const selectedLevel = this.resolveSelectedLevelForCharacter(refreshed);
+        this.ui.renderCharacterDetails(refreshed, { resetTab: false, selectedLevelId: selectedLevel.id });
       }
       const sale = result.sale || {};
       if (sale.itemName) {
@@ -409,7 +514,8 @@
       const refreshed = this.getSelectedCharacter();
       this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
       if (refreshed) {
-        this.ui.renderCharacterDetails(refreshed, { resetTab: false });
+        const selectedLevel = this.resolveSelectedLevelForCharacter(refreshed);
+        this.ui.renderCharacterDetails(refreshed, { resetTab: false, selectedLevelId: selectedLevel.id });
         if (storageLocation && this.ui.revealStorageLocation) {
           this.ui.revealStorageLocation(refreshed, storageLocation);
         }
@@ -448,7 +554,8 @@
       const refreshed = this.getSelectedCharacter();
       this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
       if (refreshed) {
-        this.ui.renderCharacterDetails(refreshed, { resetTab: false });
+        const selectedLevel = this.resolveSelectedLevelForCharacter(refreshed);
+        this.ui.renderCharacterDetails(refreshed, { resetTab: false, selectedLevelId: selectedLevel.id });
       }
 
       const claim = result.claim || {};
@@ -456,6 +563,38 @@
         this.ui.setHomeStatus(`${claim.questTitle} claimed. ${claim.rewardLabel || "Reward unlocked."}`);
       } else {
         this.ui.setHomeStatus("Quest reward claimed.");
+      }
+    }
+
+    handleClaimBountyReward(enemyTypeId) {
+      const selected = this.getSelectedCharacter();
+      if (!selected) return;
+      if (!SAVE.claimBountyReward) {
+        this.ui.setHomeStatus("Bounty claiming is not available.");
+        return;
+      }
+
+      const result = SAVE.claimBountyReward(selected.id, enemyTypeId);
+      if (!result || !result.ok) {
+        this.ui.setHomeStatus((result && result.error) || "Could not claim bounty reward.");
+        return;
+      }
+
+      this.characters = SAVE.listCharacters();
+      const refreshed = this.getSelectedCharacter();
+      this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
+      if (refreshed) {
+        const selectedLevel = this.resolveSelectedLevelForCharacter(refreshed);
+        this.ui.renderCharacterDetails(refreshed, { resetTab: false, selectedLevelId: selectedLevel.id });
+      }
+
+      const claim = result.claim || {};
+      if (claim.enemyLabel) {
+        this.ui.setHomeStatus(
+          `${claim.enemyLabel} bounty claimed. ${claim.rewardLabel || "Reward granted."}`
+        );
+      } else {
+        this.ui.setHomeStatus("Bounty reward claimed.");
       }
     }
 
@@ -613,12 +752,17 @@
 
     getObstacleConfig() {
       const config = DATA.OBSTACLES || {};
+      const legacyMinRadius = Math.max(10, Number(config.minRadius || 22));
+      const legacyMaxRadius = Math.max(legacyMinRadius, Number(config.maxRadius || 44));
       return {
         enabled: config.enabled !== false,
         minCount: Math.max(0, Math.floor(Number(config.minCount || 6))),
         maxCount: Math.max(0, Math.floor(Number(config.maxCount || 9))),
-        minRadius: Math.max(10, Number(config.minRadius || 22)),
-        maxRadius: Math.max(10, Number(config.maxRadius || 44)),
+        minWidth: Math.max(14, Number(config.minWidth || legacyMinRadius * 1.15)),
+        maxWidth: Math.max(14, Number(config.maxWidth || legacyMaxRadius * 0.95)),
+        minHeight: Math.max(18, Number(config.minHeight || legacyMinRadius * 1.9)),
+        maxHeight: Math.max(18, Number(config.maxHeight || legacyMaxRadius * 1.75)),
+        verticalBias: clamp(Number(config.verticalBias || 0.58), 0, 1),
         minGap: Math.max(0, Number(config.minGap || 14)),
         edgePadding: Math.max(0, Number(config.edgePadding || 30)),
         minDistanceFromPlayerStart: Math.max(0, Number(config.minDistanceFromPlayerStart || 95)),
@@ -631,20 +775,104 @@
       };
     }
 
+    getObstacleHalfExtents(obstacle) {
+      if (!obstacle) return { halfW: 0, halfH: 0 };
+      if (Number.isFinite(Number(obstacle.width)) && Number.isFinite(Number(obstacle.height))) {
+        return {
+          halfW: Math.max(1, Number(obstacle.width) * 0.5),
+          halfH: Math.max(1, Number(obstacle.height) * 0.5)
+        };
+      }
+      const radius = Math.max(1, Number(obstacle.radius || 0));
+      return { halfW: radius, halfH: radius };
+    }
+
+    isRectOverlappingAnyObstacle(x, y, width, height, obstacles, gap) {
+      const list = Array.isArray(obstacles) ? obstacles : [];
+      const extraGap = Math.max(0, Number(gap || 0));
+      const halfW = Math.max(1, Number(width || 0) * 0.5);
+      const halfH = Math.max(1, Number(height || 0) * 0.5);
+
+      for (let i = 0; i < list.length; i += 1) {
+        const obstacle = list[i];
+        if (!obstacle) continue;
+        const obstacleSize = this.getObstacleHalfExtents(obstacle);
+        const overlapX = Math.abs(x - obstacle.x) < halfW + obstacleSize.halfW + extraGap;
+        const overlapY = Math.abs(y - obstacle.y) < halfH + obstacleSize.halfH + extraGap;
+        if (overlapX && overlapY) return true;
+      }
+      return false;
+    }
+
     isCircleOverlappingAnyObstacle(x, y, radius, obstacles, padding) {
       const list = Array.isArray(obstacles) ? obstacles : [];
+      const circleRadius = Math.max(0, Number(radius || 0));
       const extraPadding = Math.max(0, Number(padding || 0));
       for (let i = 0; i < list.length; i += 1) {
         const obstacle = list[i];
         if (!obstacle) continue;
-        const dx = x - obstacle.x;
-        const dy = y - obstacle.y;
-        const minDistance = Math.max(0, Number(radius || 0)) + Math.max(0, Number(obstacle.radius || 0)) + extraPadding;
-        if (dx * dx + dy * dy < minDistance * minDistance) {
+        const obstacleSize = this.getObstacleHalfExtents(obstacle);
+        const left = obstacle.x - (obstacleSize.halfW + extraPadding);
+        const right = obstacle.x + (obstacleSize.halfW + extraPadding);
+        const top = obstacle.y - (obstacleSize.halfH + extraPadding);
+        const bottom = obstacle.y + (obstacleSize.halfH + extraPadding);
+        const closestX = clamp(x, left, right);
+        const closestY = clamp(y, top, bottom);
+        const dx = x - closestX;
+        const dy = y - closestY;
+        if (dx * dx + dy * dy < circleRadius * circleRadius) {
           return true;
         }
       }
       return false;
+    }
+
+    resolveCircleObstacleCollision(entity, obstacle, padding) {
+      if (!entity || !obstacle) return false;
+      const circleRadius = Math.max(0, Number(entity.radius || 0));
+      if (circleRadius <= 0) return false;
+      const pad = Math.max(0, Number(padding || 0));
+      const obstacleSize = this.getObstacleHalfExtents(obstacle);
+      const halfW = obstacleSize.halfW + pad;
+      const halfH = obstacleSize.halfH + pad;
+
+      const left = obstacle.x - halfW;
+      const right = obstacle.x + halfW;
+      const top = obstacle.y - halfH;
+      const bottom = obstacle.y + halfH;
+
+      const closestX = clamp(entity.x, left, right);
+      const closestY = clamp(entity.y, top, bottom);
+      let dx = entity.x - closestX;
+      let dy = entity.y - closestY;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq > 0.0001) {
+        const dist = Math.sqrt(distSq);
+        if (dist >= circleRadius) return false;
+        const overlap = circleRadius - dist;
+        entity.x += (dx / dist) * overlap;
+        entity.y += (dy / dist) * overlap;
+        return true;
+      }
+
+      // Center is inside rect bounds: push out along the shallowest axis.
+      const pushLeft = Math.abs(entity.x - left);
+      const pushRight = Math.abs(right - entity.x);
+      const pushTop = Math.abs(entity.y - top);
+      const pushBottom = Math.abs(bottom - entity.y);
+      const minPush = Math.min(pushLeft, pushRight, pushTop, pushBottom);
+
+      if (minPush === pushLeft) {
+        entity.x = left - circleRadius;
+      } else if (minPush === pushRight) {
+        entity.x = right + circleRadius;
+      } else if (minPush === pushTop) {
+        entity.y = top - circleRadius;
+      } else {
+        entity.y = bottom + circleRadius;
+      }
+      return true;
     }
 
     createRunObstacles(world, player) {
@@ -664,24 +892,44 @@
       for (let i = 0; i < targetCount; i += 1) {
         let placed = false;
         for (let attempt = 0; attempt < 70; attempt += 1) {
-          const radius = randRange(config.minRadius, config.maxRadius);
-          const minX = centerX - halfRangeX + config.edgePadding + radius;
-          const maxX = centerX + halfRangeX - config.edgePadding - radius;
-          const minY = centerY - halfRangeY + config.edgePadding + radius;
-          const maxY = centerY + halfRangeY - config.edgePadding - radius;
+          let width = randRange(Math.min(config.minWidth, config.maxWidth), Math.max(config.minWidth, config.maxWidth));
+          let height = randRange(Math.min(config.minHeight, config.maxHeight), Math.max(config.minHeight, config.maxHeight));
+          if (Math.random() > config.verticalBias) {
+            const swap = width;
+            width = height;
+            height = swap;
+          }
+          const halfW = width * 0.5;
+          const halfH = height * 0.5;
+
+          const minX = centerX - halfRangeX + config.edgePadding + halfW;
+          const maxX = centerX + halfRangeX - config.edgePadding - halfW;
+          const minY = centerY - halfRangeY + config.edgePadding + halfH;
+          const maxY = centerY + halfRangeY - config.edgePadding - halfH;
           if (maxX <= minX || maxY <= minY) break;
 
           const x = randRange(minX, maxX);
           const y = randRange(minY, maxY);
-          const toPlayer = Math.hypot(x - centerX, y - centerY);
-          if (toPlayer < config.minDistanceFromPlayerStart + radius + (player ? player.radius : 0)) continue;
-          if (this.isCircleOverlappingAnyObstacle(x, y, radius, obstacles, config.minGap)) continue;
+          if (
+            this.isCircleOverlappingAnyObstacle(
+              centerX,
+              centerY,
+              config.minDistanceFromPlayerStart + (player ? player.radius : 0),
+              [{ x, y, width, height }],
+              0
+            )
+          ) {
+            continue;
+          }
+          if (this.isRectOverlappingAnyObstacle(x, y, width, height, obstacles, config.minGap)) continue;
 
           obstacles.push({
             id: this.nextEntityId(),
             x,
             y,
-            radius
+            width,
+            height,
+            spriteIndex: this.obstacleSprites.length ? randInt(0, this.obstacleSprites.length - 1) : 0
           });
           placed = true;
           break;
@@ -703,12 +951,12 @@
       for (let i = 0; i < obstacles.length; i += 1) {
         const obstacle = obstacles[i];
         if (!obstacle) continue;
-        const nextX = obstacle.x + shiftX;
-        const nextY = obstacle.y + shiftY;
-        const dx = player.x - nextX;
-        const dy = player.y - nextY;
-        const minDistance = player.radius + obstacle.radius + padding;
-        if (dx * dx + dy * dy < minDistance * minDistance) {
+        const shiftedObstacle = {
+          ...obstacle,
+          x: obstacle.x + shiftX,
+          y: obstacle.y + shiftY
+        };
+        if (this.isCircleOverlappingAnyObstacle(player.x, player.y, player.radius, [shiftedObstacle], padding)) {
           return false;
         }
       }
@@ -758,20 +1006,7 @@
         for (let pass = 0; pass < 2; pass += 1) {
           obstacles.forEach((obstacle) => {
             if (!obstacle) return;
-            let dx = enemy.x - obstacle.x;
-            let dy = enemy.y - obstacle.y;
-            let distance = Math.hypot(dx, dy);
-            const minDistance = enemy.radius + obstacle.radius + padding;
-            if (distance >= minDistance) return;
-            if (distance < 0.0001) {
-              const angle = ((enemy.id * 19.7 + obstacle.id * 3.9 + (run.time || 0) * 2.3) % (Math.PI * 2));
-              dx = Math.cos(angle);
-              dy = Math.sin(angle);
-              distance = 1;
-            }
-            const overlap = minDistance - distance;
-            enemy.x += (dx / distance) * overlap;
-            enemy.y += (dy / distance) * overlap;
+            this.resolveCircleObstacleCollision(enemy, obstacle, padding);
           });
         }
       });
@@ -1038,7 +1273,9 @@
       const targetCount = clamp(Math.floor(countBase + minute * countPerMinute), 4, maxCount);
       const ringRadiusBase = Number(encirclementConfig.ringRadius || 220);
       const ringGrowth = Number(encirclementConfig.ringRadiusGrowthPerMinute || 0);
-      const ringRadius = Math.max(120, ringRadiusBase + minute * ringGrowth);
+      const spawnRadiusMultiplier = Math.max(1, Number(encirclementConfig.spawnRadiusMultiplier || 2));
+      const minRingRadius = Math.max(120, Number(encirclementConfig.minRingRadius || 240));
+      const ringRadius = Math.max(minRingRadius, (ringRadiusBase + minute * ringGrowth) * spawnRadiusMultiplier);
       const brokenChance = clamp(Number(encirclementConfig.brokenRingChance || 0.5), 0, 1);
       const brokenGap = clamp(Number(encirclementConfig.brokenRingGapRadians || 1), 0.4, Math.PI * 1.2);
       const isBrokenRing = Math.random() < brokenChance;
@@ -1054,6 +1291,7 @@
         duration,
         targetCount,
         ringRadius,
+        minRingRadius,
         isBrokenRing,
         gapCenterAngle: randRange(0, Math.PI * 2),
         gapRadians: brokenGap,
@@ -1154,7 +1392,8 @@
           if (delta <= gapHalf) continue;
         }
 
-        const radius = Math.max(80, Number(event.ringRadius || 220));
+        const minRingRadius = Math.max(120, Number(event.minRingRadius || 240));
+        const radius = Math.max(minRingRadius, Number(event.ringRadius || 220));
         const x = player.x + Math.cos(angle) * radius;
         const y = player.y + Math.sin(angle) * radius;
         const enemyTypeId = weightedChoice(event.enemyWeights || { grunt: 0.58, runner: 0.34, dasher: 0.08 }) || "grunt";
@@ -1322,6 +1561,8 @@
       if (definition.itemType === "ranged_weapon") return ["rangedWeapon"];
       if (definition.itemType === "helmet") return ["helmet"];
       if (definition.itemType === "chest") return ["chest"];
+      if (definition.itemType === "leggings") return ["leggings"];
+      if (definition.itemType === "boots") return ["boots"];
       if (definition.itemType === "ring") return ["ring1", "ring2"];
       if (definition.itemType === "amulet") return ["amulet"];
       return [];
@@ -1419,6 +1660,28 @@
       });
     }
 
+    spawnFinalBossRewardChest(enemy) {
+      const run = this.currentRun;
+      if (!run || !enemy) return;
+      const lootItems = this.generateLootItemsForSource("finalBoss", enemy);
+      this.spawnPickup(enemy.x, enemy.y, "boss_chest", 1, { lootItems });
+    }
+
+    openBossChest(pickup) {
+      const run = this.currentRun;
+      if (!run || !pickup || pickup.opened) return;
+      pickup.opened = true;
+      pickup.openTimer = 0.95;
+      const lootItems = Array.isArray(pickup.lootItems) ? pickup.lootItems.filter(Boolean) : [];
+      const rewardBuffer = run.postRunRewards && Array.isArray(run.postRunRewards.items) ? run.postRunRewards.items : null;
+      if (rewardBuffer) {
+        lootItems.forEach((item) => rewardBuffer.push(item));
+      }
+      pickup.lootItems = [];
+      run.stats.bossChestOpened = true;
+      run.stats.bossChestItemsFound += lootItems.length;
+    }
+
     startVictoryCollectionWindow() {
       const run = this.currentRun;
       if (!run) return;
@@ -1431,16 +1694,19 @@
       }
     }
 
-    createRunState(character) {
+    createRunState(character, selectedLevel) {
       const axeData = DATA.WEAPONS.axe;
       const javelinData = DATA.WEAPONS.javelin;
       const playerBase = DATA.PLAYER_BASE;
       const width = Math.max(1, this.canvas.clientWidth);
       const height = Math.max(1, this.canvas.clientHeight);
+      const level = this.resolveSelectedLevelForCharacter(character, selectedLevel && selectedLevel.id);
 
       const runState = {
         characterId: character.id,
         characterName: character.name,
+        level,
+        bestiaryDiscoveries: this.getCharacterBestiaryDiscoverySet(character),
         classId: character.classId,
         progressionLevel: Math.max(1, Math.floor(Number(character.progressionLevel || 1))),
         attributes: {
@@ -1453,6 +1719,9 @@
         world: { width, height },
         worldOffset: { x: 0, y: 0 },
         time: 0,
+        postRunRewards: {
+          items: []
+        },
         victoryCountdownRemaining: 0,
         ended: false,
         pauseReason: null,
@@ -1548,10 +1817,14 @@
         },
         stats: {
           enemiesKilled: 0,
+          enemyKillsByType: {},
           goldEarned: 0,
           goldPickupCarry: 0,
+          newBestiaryEntries: 0,
           legacyXpEarned: 0,
           minibossesDefeated: 0,
+          bossChestOpened: false,
+          bossChestItemsFound: 0,
           finalBossAppeared: false,
           finalBossDefeated: false
         }
@@ -1569,7 +1842,8 @@
         this.ui.setHomeStatus("Select a character first.");
         return;
       }
-      this.currentRun = this.createRunState(character);
+      const selectedLevel = this.resolveSelectedLevelForCharacter(character);
+      this.currentRun = this.createRunState(character, selectedLevel);
       this.ui.showGameScreen();
       this.ui.hidePause();
       this.ui.hideLevelUp();
@@ -1582,7 +1856,8 @@
       if (!this.currentRun) return;
       const character = SAVE.getCharacter(this.currentRun.characterId);
       if (!character) return;
-      this.currentRun = this.createRunState(character);
+      const selectedLevel = this.resolveSelectedLevelForCharacter(character, this.currentRun.level && this.currentRun.level.id);
+      this.currentRun = this.createRunState(character, selectedLevel);
       this.ui.showGameScreen();
       this.ui.hidePause();
       this.ui.hideLevelUp();
@@ -2040,6 +2315,7 @@
       }
 
       run.entities.enemies.push(enemy);
+      this.markEnemyEncountered(enemy.typeId);
     }
 
     updateEnemies(dt) {
@@ -2355,6 +2631,12 @@
         if (pickup.type === "item" && pickup.blockedTimer > 0) {
           pickup.blockedTimer = Math.max(0, pickup.blockedTimer - dt);
         }
+        if (pickup.type === "boss_chest" && pickup.opened) {
+          pickup.openTimer = Math.max(0, Number(pickup.openTimer || 0) - dt);
+          if (pickup.openTimer <= 0) {
+            return;
+          }
+        }
 
         const dx = player.x - pickup.x;
         const dy = player.y - pickup.y;
@@ -2403,6 +2685,12 @@
             this.activateBattleFury();
           } else if (pickup.type === healingOrbConfig.id) {
             this.healPlayer(healingOrbConfig.effect.healAmount);
+          } else if (pickup.type === "boss_chest") {
+            if (!pickup.opened) {
+              this.openBossChest(pickup);
+            }
+            kept.push(pickup);
+            return;
           } else if (pickup.type === "item") {
             if (pickup.blockedTimer > 0) {
               kept.push(pickup);
@@ -2801,6 +3089,11 @@
       const run = this.currentRun;
       const effects = run.attributeEffects || this.calculateAttributeEffects(run.attributes);
       run.stats.enemiesKilled += 1;
+      const enemyTypeId = String((enemy && enemy.typeId) || "").trim();
+      if (enemyTypeId) {
+        const currentKills = Math.max(0, Math.floor(Number(run.stats.enemyKillsByType[enemyTypeId] || 0)));
+        run.stats.enemyKillsByType[enemyTypeId] = currentKills + 1;
+      }
       this.gainRage(run, (run.player.rage.gainOnKill || 0) * Math.max(1, effects.rageGainMultiplier || 1));
       if (run.player.rage.active && (effects.killExtendsRageSeconds || 0) > 0) {
         run.player.rage.timeLeft += effects.killExtendsRageSeconds;
@@ -2833,7 +3126,7 @@
         run.stats.finalBossDefeated = true;
         run.stats.legacyXpEarned += DATA.ENEMIES.finalBoss.legacyReward;
         this.spawnPickup(enemy.x, enemy.y, "gold", enemy.goldDrop);
-        this.spawnBossLootDrops("finalBoss", enemy);
+        this.spawnFinalBossRewardChest(enemy);
         this.startVictoryCollectionWindow();
       }
 
@@ -2850,6 +3143,7 @@
       const battleFuryRadius = Math.max(5, Number(battleFuryConfig.visual && battleFuryConfig.visual.radius));
       const healingOrbConfig = this.getHealingOrbPowerupConfig();
       const healingOrbRadius = Math.max(5, Number(healingOrbConfig.visual && healingOrbConfig.visual.radius));
+      const chestRadius = 13;
       const pickup = {
         id: this.nextEntityId(),
         x,
@@ -2865,6 +3159,8 @@
             ? battleFuryRadius
             : type === healingOrbConfig.id
             ? healingOrbRadius
+            : type === "boss_chest"
+            ? chestRadius
             : 6,
         type,
         value: Math.max(1, Math.floor(value || 1))
@@ -2873,6 +3169,10 @@
         pickup.item = opts.item || null;
         pickup.rarity = opts.rarity || (pickup.item && pickup.item.rarity) || "grey";
         pickup.blockedTimer = 0;
+      } else if (type === "boss_chest") {
+        pickup.opened = false;
+        pickup.openTimer = 0;
+        pickup.lootItems = Array.isArray(opts.lootItems) ? opts.lootItems.filter(Boolean) : [];
       }
       this.currentRun.entities.pickups.push(pickup);
     }
@@ -2896,17 +3196,38 @@
 
       const summary = {
         characterName: run.characterName,
+        levelLabel: run.level && run.level.label ? run.level.label : "Level 1",
+        completedLevelNumber: run.level ? Math.max(1, Math.floor(Number(run.level.index || 1))) : 1,
+        victory: reason === "victory",
         timeSurvived: Math.floor(run.time),
         enemiesKilled: run.stats.enemiesKilled,
+        enemyKillsByType: { ...(run.stats.enemyKillsByType || {}) },
         goldEarned: run.stats.goldEarned,
+        newBestiaryEntries: Math.max(0, Math.floor(Number(run.stats.newBestiaryEntries || 0))),
         legacyXpEarned: run.stats.legacyXpEarned,
         deaths: reason === "death" ? 1 : 0,
         minibossesDefeated: run.stats.minibossesDefeated,
+        bossChestOpened: Boolean(run.stats.bossChestOpened),
+        bossChestItemsFound: Math.max(0, Math.floor(Number(run.stats.bossChestItemsFound || 0))),
+        bossChestItemsStored: 0,
+        bossChestItemsOverflow: 0,
         finalBossAppeared: run.stats.finalBossAppeared,
         finalBossDefeated: run.stats.finalBossDefeated
       };
 
       SAVE.applyRunRewards(run.characterId, summary);
+      const postRunItems =
+        run.postRunRewards && Array.isArray(run.postRunRewards.items) ? run.postRunRewards.items.filter(Boolean) : [];
+      if (postRunItems.length) {
+        postRunItems.forEach((item) => {
+          const stored = SAVE.storeItemInStorage(run.characterId, item);
+          if (stored && stored.ok) {
+            summary.bossChestItemsStored += 1;
+          } else {
+            summary.bossChestItemsOverflow += 1;
+          }
+        });
+      }
       this.refreshCharacterCacheAfterRun(run.characterId);
       this.ui.showEndRun(summary);
     }
@@ -2948,6 +3269,7 @@
       this.drawBackgroundGrid(width, height);
       this.drawObstacles();
       this.drawPickups();
+      this.drawOffscreenPowerupIndicators();
       this.drawPlayerProjectiles();
       this.drawEnemyProjectiles();
       this.drawEnemies();
@@ -2994,32 +3316,38 @@
 
       obstacles.forEach((obstacle) => {
         if (!obstacle) return;
-        const r = Math.max(6, Number(obstacle.radius || 0));
+        const obstacleSize = this.getObstacleHalfExtents(obstacle);
+        const halfW = obstacleSize.halfW;
+        const halfH = obstacleSize.halfH;
         if (
-          obstacle.x < -r - 6 ||
-          obstacle.y < -r - 6 ||
-          obstacle.x > run.world.width + r + 6 ||
-          obstacle.y > run.world.height + r + 6
+          obstacle.x < -halfW - 6 ||
+          obstacle.y < -halfH - 6 ||
+          obstacle.x > run.world.width + halfW + 6 ||
+          obstacle.y > run.world.height + halfH + 6
         ) {
           return;
         }
 
-        ctx.fillStyle = fillColor;
-        ctx.beginPath();
-        ctx.arc(obstacle.x, obstacle.y, r, 0, Math.PI * 2);
-        ctx.fill();
+        const width = halfW * 2;
+        const height = halfH * 2;
+        const left = obstacle.x - halfW;
+        const top = obstacle.y - halfH;
+        const sprite =
+          this.obstacleSprites && this.obstacleSprites.length
+            ? this.obstacleSprites[Math.max(0, Math.min(this.obstacleSprites.length - 1, Number(obstacle.spriteIndex || 0)))]
+            : null;
 
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(obstacle.x, obstacle.y, r, 0, Math.PI * 2);
-        ctx.stroke();
-
-        ctx.strokeStyle = "rgba(242, 248, 255, 0.1)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(obstacle.x - r * 0.2, obstacle.y - r * 0.18, r * 0.45, 0, Math.PI * 2);
-        ctx.stroke();
+        if (sprite && sprite.complete && sprite.naturalWidth > 0) {
+          ctx.drawImage(sprite, left, top, width, height);
+        } else {
+          ctx.fillStyle = fillColor;
+          ctx.fillRect(left, top, width, height);
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(left + 0.5, top + 0.5, Math.max(1, width - 1), Math.max(1, height - 1));
+          ctx.fillStyle = "rgba(248, 252, 255, 0.12)";
+          ctx.fillRect(left + 3, top + 3, Math.max(2, width * 0.35), Math.max(2, height * 0.14));
+        }
       });
     }
 
@@ -3158,6 +3486,31 @@
           ctx.stroke();
           return;
         }
+        if (pickup.type === "boss_chest") {
+          const r = pickup.radius;
+          const left = pickup.x - r * 1.2;
+          const top = pickup.y - r * 0.9;
+          const width = r * 2.4;
+          const height = r * 1.9;
+          const spriteIndex = pickup.opened ? 1 : 0;
+          const sprite =
+            this.chestSprites && this.chestSprites.length
+              ? this.chestSprites[Math.max(0, Math.min(this.chestSprites.length - 1, spriteIndex))]
+              : null;
+
+          if (sprite && sprite.complete && sprite.naturalWidth > 0) {
+            ctx.drawImage(sprite, left, top, width, height);
+          } else {
+            ctx.fillStyle = pickup.opened ? "#a76b3a" : "#8c5a34";
+            ctx.fillRect(left, top + height * 0.36, width, height * 0.64);
+            ctx.fillStyle = pickup.opened ? "#b88453" : "#9d6a3d";
+            ctx.fillRect(left, top, width, height * 0.42);
+            ctx.strokeStyle = "#f2d28a";
+            ctx.lineWidth = 1.6;
+            ctx.strokeRect(left + width * 0.46, top + height * 0.22, width * 0.08, height * 0.58);
+          }
+          return;
+        }
         if (pickup.type === magnetConfig.id) {
           const r = pickup.radius;
           const fillColor = (magnetConfig.visual && magnetConfig.visual.fillColor) || "#76d68c";
@@ -3225,6 +3578,145 @@
         ctx.beginPath();
         ctx.arc(pickup.x, pickup.y, pickup.radius, 0, Math.PI * 2);
         ctx.fill();
+      });
+    }
+
+    getPowerupIndicatorInfo(typeId) {
+      const magnetConfig = this.getMagnetPowerupConfig();
+      if (typeId === magnetConfig.id) {
+        return {
+          id: magnetConfig.id,
+          label: magnetConfig.label || "Magnet",
+          fillColor: (magnetConfig.visual && magnetConfig.visual.fillColor) || "#76d68c",
+          ringColor: (magnetConfig.visual && magnetConfig.visual.ringColor) || "#c6ffdb"
+        };
+      }
+      const battleFuryConfig = this.getBattleFuryPowerupConfig();
+      if (typeId === battleFuryConfig.id) {
+        return {
+          id: battleFuryConfig.id,
+          label: battleFuryConfig.label || "Battle Fury",
+          fillColor: (battleFuryConfig.visual && battleFuryConfig.visual.fillColor) || "#ff9f5f",
+          ringColor: (battleFuryConfig.visual && battleFuryConfig.visual.ringColor) || "#ffd5b0"
+        };
+      }
+      const healingOrbConfig = this.getHealingOrbPowerupConfig();
+      if (typeId === healingOrbConfig.id) {
+        return {
+          id: healingOrbConfig.id,
+          label: healingOrbConfig.label || "Healing Orb",
+          fillColor: (healingOrbConfig.visual && healingOrbConfig.visual.fillColor) || "#7ee28e",
+          ringColor: (healingOrbConfig.visual && healingOrbConfig.visual.ringColor) || "#d4ffdc"
+        };
+      }
+      const powerups = DATA.POWERUPS || {};
+      const fallback = Object.values(powerups).find((powerup) => {
+        if (!powerup || typeof powerup !== "object") return false;
+        return String(powerup.id || "").trim() === String(typeId || "").trim();
+      });
+      if (fallback) {
+        const visual = fallback.visual || {};
+        return {
+          id: fallback.id || typeId,
+          label: fallback.label || String(typeId || "Powerup"),
+          fillColor: visual.fillColor || "#89d6ff",
+          ringColor: visual.ringColor || "#d5f0ff"
+        };
+      }
+      return null;
+    }
+
+    getPowerupIndicatorToken(label) {
+      const text = String(label || "").trim();
+      if (!text) return "?";
+      const words = text.split(/\s+/).filter(Boolean);
+      if (words.length >= 2) {
+        return `${words[0].charAt(0)}${words[1].charAt(0)}`.toUpperCase();
+      }
+      return words[0].slice(0, 2).toUpperCase();
+    }
+
+    drawOffscreenPowerupIndicators() {
+      const run = this.currentRun;
+      if (!run || !run.entities || !Array.isArray(run.entities.pickups) || !run.entities.pickups.length) return;
+      const player = run.player;
+      const width = run.world.width;
+      const height = run.world.height;
+      if (!player || width <= 0 || height <= 0) return;
+
+      const nearestByType = {};
+      run.entities.pickups.forEach((pickup) => {
+        if (!pickup) return;
+        const indicatorInfo = this.getPowerupIndicatorInfo(pickup.type);
+        if (!indicatorInfo) return;
+        const onScreen = pickup.x >= 0 && pickup.x <= width && pickup.y >= 0 && pickup.y <= height;
+        if (onScreen) return;
+
+        const dx = pickup.x - player.x;
+        const dy = pickup.y - player.y;
+        const distSq = dx * dx + dy * dy;
+        if (!Number.isFinite(distSq) || distSq <= 0.001) return;
+
+        const existing = nearestByType[pickup.type];
+        if (!existing || distSq < existing.distSq) {
+          nearestByType[pickup.type] = {
+            pickup,
+            indicatorInfo,
+            dx,
+            dy,
+            distSq
+          };
+        }
+      });
+
+      const entries = Object.values(nearestByType);
+      if (!entries.length) return;
+      const ctx = this.ctx;
+      const inset = 22;
+      const halfW = Math.max(1, width * 0.5 - inset);
+      const halfH = Math.max(1, height * 0.5 - inset);
+      const pulse = 0.92 + Math.sin(run.time * 4.5) * 0.08;
+
+      entries.forEach((entry) => {
+        const dir = normalizeVector(entry.dx, entry.dy);
+        if (!dir.x && !dir.y) return;
+        const tx = Math.abs(dir.x) < 0.0001 ? Number.POSITIVE_INFINITY : halfW / Math.abs(dir.x);
+        const ty = Math.abs(dir.y) < 0.0001 ? Number.POSITIVE_INFINITY : halfH / Math.abs(dir.y);
+        const t = Math.min(tx, ty);
+        const anchorX = player.x + dir.x * t;
+        const anchorY = player.y + dir.y * t;
+        const angle = Math.atan2(dir.y, dir.x);
+        const info = entry.indicatorInfo;
+        const token = this.getPowerupIndicatorToken(info.label);
+
+        ctx.save();
+        ctx.translate(anchorX, anchorY);
+        ctx.rotate(angle);
+        ctx.scale(pulse, pulse);
+
+        ctx.fillStyle = info.fillColor;
+        ctx.strokeStyle = info.ringColor;
+        ctx.lineWidth = 2;
+
+        ctx.beginPath();
+        ctx.arc(0, 0, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(12, 0);
+        ctx.lineTo(2, 6.2);
+        ctx.lineTo(2, -6.2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.fillStyle = "rgba(241, 247, 255, 0.92)";
+        ctx.font = "10px Trebuchet MS, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(token, anchorX, anchorY);
       });
     }
 

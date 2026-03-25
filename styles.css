@@ -76,6 +76,44 @@ input {
   color: var(--muted);
 }
 
+.level-selector-block {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+}
+
+.level-selector-title {
+  color: #dae4f7;
+  font-size: 0.84rem;
+  font-weight: bold;
+  letter-spacing: 0.01em;
+}
+
+.level-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.level-selector-empty {
+  border: 1px dashed #5b6582;
+  border-radius: 10px;
+  padding: 0.44rem 0.58rem;
+  background: rgba(13, 17, 24, 0.35);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.level-selector-btn {
+  min-width: 98px;
+  padding: 0.5rem 0.7rem;
+}
+
+.level-selector-btn.active {
+  border-color: #da633d;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+}
+
 .home-actions {
   display: flex;
   gap: 0.65rem;
@@ -213,6 +251,11 @@ input {
   overflow-y: visible;
 }
 
+.skill-content.quest-content {
+  max-height: none;
+  overflow-y: visible;
+}
+
 .skill-title {
   font-weight: bold;
   margin-bottom: 0.25rem;
@@ -244,6 +287,21 @@ input {
 }
 
 .merchant-mode-tab-btn.active {
+  border-color: #da633d;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+}
+
+.merchant-buy-category-tabs {
+  display: flex;
+  gap: 0.42rem;
+  flex-wrap: wrap;
+}
+
+.merchant-buy-category-tab-btn {
+  min-width: 100px;
+}
+
+.merchant-buy-category-tab-btn.active {
   border-color: #da633d;
   background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
 }
@@ -290,6 +348,26 @@ input {
 .merchant-item-name {
   font-weight: bold;
   color: #f4f7ff;
+}
+
+.rarity-text-grey {
+  color: #d4dbe9;
+}
+
+.rarity-text-blue {
+  color: #8bb8ff;
+}
+
+.rarity-text-purple {
+  color: #ca9fff;
+}
+
+.rarity-text-gold {
+  color: #f2cf77;
+}
+
+.rarity-text-green {
+  color: #8fe3a8;
 }
 
 .merchant-item-meta {
@@ -339,11 +417,35 @@ input {
 .quest-panel {
   display: grid;
   gap: 0.72rem;
+  overflow-y: visible;
 }
 
 .quest-list {
   display: grid;
   gap: 0.58rem;
+}
+
+.quest-mode-tabs {
+  display: flex;
+  gap: 0.42rem;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding: 0.38rem 0.45rem;
+  border: 1px solid #4f5d80;
+  border-radius: 10px;
+  background: rgba(23, 31, 45, 0.96);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+}
+
+.quest-mode-tab-btn {
+  min-width: 100px;
+}
+
+.quest-mode-tab-btn.active {
+  border-color: #da633d;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
 }
 
 .quest-card {
@@ -406,6 +508,80 @@ input {
   font-size: 0.78rem;
 }
 
+.bestiary-panel {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.bestiary-progress {
+  border: 1px solid #556486;
+  border-radius: 10px;
+  background: rgba(17, 24, 38, 0.76);
+  padding: 0.52rem 0.62rem;
+  color: #d8e1f5;
+  font-size: 0.84rem;
+}
+
+.bestiary-empty {
+  border: 1px dashed #5a698b;
+  border-radius: 10px;
+  padding: 0.7rem;
+  background: rgba(13, 18, 29, 0.62);
+  color: #c2cee6;
+  font-size: 0.88rem;
+}
+
+.bestiary-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.bestiary-card {
+  border: 1px solid #546285;
+  border-radius: 10px;
+  background: rgba(16, 23, 36, 0.75);
+  padding: 0.58rem 0.64rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.bestiary-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.55rem;
+}
+
+.bestiary-name {
+  color: #f4f8ff;
+  font-weight: bold;
+}
+
+.bestiary-behavior {
+  color: #9bb0d8;
+  font-size: 0.77rem;
+}
+
+.bestiary-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.bestiary-stat {
+  color: #d7e1f6;
+  font-size: 0.8rem;
+  border: 1px solid #4d5c7e;
+  border-radius: 7px;
+  background: rgba(21, 30, 46, 0.7);
+  padding: 0.2rem 0.38rem;
+}
+
+.bestiary-line {
+  color: #c9d5ef;
+  font-size: 0.8rem;
+}
+
 .inventory-section {
   border: 1px solid #4f5a79;
   border-radius: 10px;
@@ -417,12 +593,12 @@ input {
 
 .equipment-layout {
   display: grid;
-  grid-template-columns: repeat(3, minmax(94px, 1fr));
+  grid-template-columns: repeat(4, minmax(84px, 1fr));
   grid-template-areas:
-    ". head ."
-    "primary-melee chest ranged"
-    "secondary-melee silhouette ring1"
-    ". amulet ring2";
+    ". head head ."
+    "primary-melee chest ranged ring1"
+    "secondary-melee leggings silhouette ring2"
+    ". boots amulet .";
   gap: 0.45rem;
   align-items: stretch;
 }
@@ -483,6 +659,14 @@ input {
   grid-area: chest;
 }
 
+.slot-leggings {
+  grid-area: leggings;
+}
+
+.slot-boots {
+  grid-area: boots;
+}
+
 .slot-primary-melee {
   grid-area: primary-melee;
 }
@@ -526,6 +710,41 @@ input {
 .equipment-slot-stat {
   color: #9ae2b1;
   font-size: 0.68rem;
+}
+
+.equipment-bonus-summary {
+  border: 1px solid #4f5d80;
+  border-radius: 9px;
+  background: rgba(16, 23, 36, 0.72);
+  padding: 0.5rem 0.58rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.equipment-bonus-title {
+  color: #dfe9ff;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.equipment-bonus-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem 0.44rem;
+}
+
+.equipment-bonus-item {
+  color: #9fe6b7;
+  font-size: 0.74rem;
+  border: 1px solid rgba(125, 174, 141, 0.4);
+  border-radius: 7px;
+  background: rgba(26, 39, 34, 0.52);
+  padding: 0.16rem 0.34rem;
+}
+
+.equipment-bonus-empty {
+  color: #93a4c8;
+  font-size: 0.74rem;
 }
 
 .storage-tabs {
@@ -607,6 +826,36 @@ input {
 .storage-slot-stat {
   color: #9ae2b1;
   font-size: 0.64rem;
+}
+
+.merchant-item-name.rarity-text-grey,
+.equipment-slot-value.rarity-text-grey,
+.storage-slot-value.rarity-text-grey {
+  color: #d4dbe9;
+}
+
+.merchant-item-name.rarity-text-blue,
+.equipment-slot-value.rarity-text-blue,
+.storage-slot-value.rarity-text-blue {
+  color: #8bb8ff;
+}
+
+.merchant-item-name.rarity-text-purple,
+.equipment-slot-value.rarity-text-purple,
+.storage-slot-value.rarity-text-purple {
+  color: #ca9fff;
+}
+
+.merchant-item-name.rarity-text-gold,
+.equipment-slot-value.rarity-text-gold,
+.storage-slot-value.rarity-text-gold {
+  color: #f2cf77;
+}
+
+.merchant-item-name.rarity-text-green,
+.equipment-slot-value.rarity-text-green,
+.storage-slot-value.rarity-text-green {
+  color: #8fe3a8;
 }
 
 .category-card {
@@ -1468,7 +1717,7 @@ input {
   }
 
   .equipment-layout {
-    grid-template-columns: repeat(3, minmax(78px, 1fr));
+    grid-template-columns: repeat(4, minmax(62px, 1fr));
   }
 
   .storage-grid {
