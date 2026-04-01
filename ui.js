@@ -71,6 +71,7 @@
       createCharacterBtn: byId("createCharacterBtn"),
       startRunBtn: byId("startRunBtn"),
       levelSelector: byId("levelSelector"),
+      difficultySelector: byId("difficultySelector"),
       homeStatus: byId("homeStatus"),
       characterList: byId("characterList"),
       itemReferenceToggleBtn: byId("itemReferenceToggleBtn"),
@@ -83,6 +84,7 @@
       characterSummary: byId("characterSummary"),
       weaponsTabBtn: byId("weaponsTabBtn"),
       classTabBtn: byId("classTabBtn"),
+      skillsTabBtn: byId("skillsTabBtn"),
       inventoryTabBtn: byId("inventoryTabBtn"),
       merchantTabBtn: byId("merchantTabBtn"),
       questsTabBtn: byId("questsTabBtn"),
@@ -111,6 +113,8 @@
       hudHp: byId("hudHp"),
       healthHudLabel: byId("healthHudLabel"),
       healthFill: byId("healthFill"),
+      healthPotionHudLabel: byId("healthPotionHudLabel"),
+      roundTimerHudLabel: byId("roundTimerHudLabel"),
       hudLevel: byId("hudLevel"),
       hudGold: byId("hudGold"),
       hudLegacy: byId("hudLegacy"),
@@ -124,6 +128,7 @@
       onCreateCharacter: null,
       onSelectCharacter: null,
       onSelectLevel: null,
+      onSelectDifficulty: null,
       onDeleteCharacter: null,
       onStartRun: null,
       onChooseUpgrade: null,
@@ -145,7 +150,6 @@
       activeSkillTab: "weapons",
       skillTreeProgress: null,
       inventoryStorageTabByCharacter: {},
-      merchantTabByCharacter: {},
       merchantBuyCategoryTabByCharacter: {},
       questViewTabByCharacter: {},
       inventoryRevealByCharacter: {},
@@ -153,8 +157,52 @@
       pendingDeleteCharacterId: null,
       itemReferenceOpen: false,
       itemReferenceWeaponTypeFilter: "all",
-      selectedLevelId: null
+      selectedLevelId: null,
+      selectedDifficulty: 1
     };
+    let inventoryContextMenuEl = null;
+
+    function closeInventoryContextMenu() {
+      if (!inventoryContextMenuEl) return;
+      if (inventoryContextMenuEl.parentNode) {
+        inventoryContextMenuEl.parentNode.removeChild(inventoryContextMenuEl);
+      }
+      inventoryContextMenuEl = null;
+    }
+
+    function openInventoryContextMenu(event, options) {
+      const safeOptions = options || {};
+      if (typeof safeOptions.onSell !== "function") return;
+      event.preventDefault();
+      closeInventoryContextMenu();
+
+      const menu = createElement("div", "inventory-context-menu");
+      const sellPrice = Math.max(1, Math.floor(Number(safeOptions.sellPrice || 0)));
+      const sellButton = createElement("button", "inventory-context-menu-item", `Sell for ${sellPrice}g`);
+      sellButton.type = "button";
+      sellButton.addEventListener("click", (clickEvent) => {
+        clickEvent.preventDefault();
+        clickEvent.stopPropagation();
+        closeInventoryContextMenu();
+        safeOptions.onSell();
+      });
+      menu.appendChild(sellButton);
+      document.body.appendChild(menu);
+      inventoryContextMenuEl = menu;
+
+      const padding = 8;
+      const rect = menu.getBoundingClientRect();
+      let left = Number(event.clientX || 0);
+      let top = Number(event.clientY || 0);
+      if (left + rect.width > window.innerWidth - padding) {
+        left = window.innerWidth - rect.width - padding;
+      }
+      if (top + rect.height > window.innerHeight - padding) {
+        top = window.innerHeight - rect.height - padding;
+      }
+      menu.style.left = `${Math.max(padding, left)}px`;
+      menu.style.top = `${Math.max(padding, top)}px`;
+    }
 
     function setVisible(element, visible) {
       element.classList.toggle("hidden", !visible);
@@ -246,6 +294,12 @@
         setActiveSkillTab("class");
       });
 
+      if (dom.skillsTabBtn) {
+        dom.skillsTabBtn.addEventListener("click", () => {
+          setActiveSkillTab("skills");
+        });
+      }
+
       dom.inventoryTabBtn.addEventListener("click", () => {
         setActiveSkillTab("inventory");
       });
@@ -287,6 +341,25 @@
 
       renderItemReferencePanel();
       syncItemReferenceVisibility();
+
+      document.addEventListener("click", () => {
+        closeInventoryContextMenu();
+      });
+      document.addEventListener(
+        "contextmenu",
+        (event) => {
+          if (!inventoryContextMenuEl) return;
+          if (inventoryContextMenuEl.contains(event.target)) return;
+          closeInventoryContextMenu();
+        },
+        true
+      );
+      window.addEventListener("resize", () => {
+        closeInventoryContextMenu();
+      });
+      window.addEventListener("blur", () => {
+        closeInventoryContextMenu();
+      });
     }
 
     function hideCreateError() {
@@ -363,6 +436,37 @@
       return [{ id: "level_1", index: 1, label: "Level 1", subtitle: "" }];
     }
 
+    function getDifficultyConfig() {
+      const configured = (window.RL_DATA && window.RL_DATA.DIFFICULTY_MODIFIER) || {};
+      const parsedDefault = Number(configured.defaultDifficulty);
+      const parsedMax = Number(configured.maxDifficulty);
+      const defaultDifficulty = Number.isNaN(parsedDefault) ? 1 : Math.max(1, Math.floor(parsedDefault));
+      const maxDifficulty = Number.isNaN(parsedMax) ? 10 : Math.max(defaultDifficulty, Math.floor(parsedMax));
+      return {
+        defaultDifficulty,
+        maxDifficulty
+      };
+    }
+
+    function normalizeDifficulty(value) {
+      const config = getDifficultyConfig();
+      const parsed = Number(value);
+      if (Number.isNaN(parsed)) return config.defaultDifficulty;
+      return Math.max(config.defaultDifficulty, Math.min(config.maxDifficulty, Math.floor(parsed)));
+    }
+
+    function getCharacterUnlockedDifficultyByLevel(character, levelId) {
+      const config = getDifficultyConfig();
+      if (!character || !levelId) return config.defaultDifficulty;
+      const map =
+        character.highestDifficultyByLevel && typeof character.highestDifficultyByLevel === "object"
+          ? character.highestDifficultyByLevel
+          : {};
+      const explicit = Number(map[levelId]);
+      if (Number.isNaN(explicit)) return config.defaultDifficulty;
+      return Math.max(config.defaultDifficulty, Math.min(config.maxDifficulty, Math.floor(explicit)));
+    }
+
     function renderLevelSelector(character, options) {
       if (!dom.levelSelector) return;
       dom.levelSelector.innerHTML = "";
@@ -395,10 +499,52 @@
         button.addEventListener("click", () => {
           state.selectedLevelId = level.id;
           renderLevelSelector(character, null);
+          renderDifficultySelector(character, null);
           if (handlers.onSelectLevel) handlers.onSelectLevel(level.id);
         });
         dom.levelSelector.appendChild(button);
       });
+    }
+
+    function renderDifficultySelector(character, options) {
+      if (!dom.difficultySelector) return;
+      dom.difficultySelector.innerHTML = "";
+      if (!character) {
+        dom.difficultySelector.appendChild(
+          createElement("div", "level-selector-empty", "Select a level to choose difficulty.")
+        );
+        return;
+      }
+
+      const config = getDifficultyConfig();
+      const selectedLevelId = String(state.selectedLevelId || "").trim() || "level_1";
+      const unlockedDifficulty = getCharacterUnlockedDifficultyByLevel(character, selectedLevelId);
+      const selectedFromOptions = options ? Number(options.selectedDifficulty) : Number.NaN;
+      if (!Number.isNaN(selectedFromOptions)) {
+        state.selectedDifficulty = normalizeDifficulty(selectedFromOptions);
+      }
+      state.selectedDifficulty = Math.max(config.defaultDifficulty, Math.min(unlockedDifficulty, normalizeDifficulty(state.selectedDifficulty)));
+
+      for (let difficulty = config.defaultDifficulty; difficulty <= config.maxDifficulty; difficulty += 1) {
+        const button = createElement("button", "btn level-selector-btn", `D${difficulty}`);
+        button.type = "button";
+        const isUnlocked = difficulty <= unlockedDifficulty;
+        if (!isUnlocked) {
+          button.disabled = true;
+          button.classList.add("locked");
+          button.title = `Beat ${selectedLevelId.replace(/_/g, " ")} on D${difficulty - 1} to unlock D${difficulty}.`;
+        }
+        if (difficulty === state.selectedDifficulty) {
+          button.classList.add("active");
+        }
+        button.addEventListener("click", () => {
+          if (!isUnlocked) return;
+          state.selectedDifficulty = difficulty;
+          renderDifficultySelector(character, null);
+          if (handlers.onSelectDifficulty) handlers.onSelectDifficulty(difficulty);
+        });
+        dom.difficultySelector.appendChild(button);
+      }
     }
 
     function createDefaultSkillTreeProgress() {
@@ -437,6 +583,109 @@
       });
     }
 
+    function getMainQuestDefinitions() {
+      const questsConfig = (window.RL_DATA && window.RL_DATA.QUESTS) || {};
+      return Object.values(questsConfig)
+        .reduce((list, entry) => {
+          if (!Array.isArray(entry)) return list;
+          return list.concat(entry.filter((quest) => quest && typeof quest === "object" && quest.id));
+        }, [])
+        .filter((quest) => quest.availableFromStart !== false);
+    }
+
+    function getMainQuestProgressValue(character, requirement) {
+      const req = requirement || {};
+      const requirementType = String(req.type || "").trim();
+      if (requirementType === "legacy_xp_total") {
+        return Math.max(0, Math.floor(Number(character.legacyXp || 0)));
+      }
+      if (requirementType === "total_gold_collected") {
+        return Math.max(0, Math.floor(Number(character.lifetimeGoldCollected || 0)));
+      }
+      if (requirementType === "miniboss_kills_total") {
+        return Math.max(0, Math.floor(Number(character.minibossKills || 0)));
+      }
+      if (requirementType === "enemy_kills_total") {
+        return Math.max(0, Math.floor(Number(character.enemyKills || 0)));
+      }
+      if (requirementType === "deaths_total") {
+        return Math.max(0, Math.floor(Number(character.deaths || 0)));
+      }
+      return 0;
+    }
+
+    function getClaimableMainQuestCount(character, questDefinitions) {
+      if (!character) return 0;
+      const definitions = Array.isArray(questDefinitions) ? questDefinitions : getMainQuestDefinitions();
+      const claims = character.questClaims && typeof character.questClaims === "object" ? character.questClaims : {};
+      return definitions.reduce((count, quest) => {
+        if (!quest || !quest.id) return count;
+        if (claims[quest.id] === true) return count;
+        const autoClaimOnComplete = Boolean(quest.reward && quest.reward.autoClaimOnComplete);
+        if (autoClaimOnComplete) return count;
+        const target = Math.max(1, Math.floor(Number((quest.requirement && quest.requirement.target) || 1)));
+        const current = getMainQuestProgressValue(character, quest.requirement);
+        if (current >= target) {
+          return count + 1;
+        }
+        return count;
+      }, 0);
+    }
+
+    function getClaimableBountyCount(character) {
+      if (!character) return 0;
+      const enemyDefinitions = window.RL_DATA.ENEMIES || {};
+      const discovered = character.bestiaryDiscoveries && typeof character.bestiaryDiscoveries === "object"
+        ? character.bestiaryDiscoveries
+        : {};
+      const discoveredEnemyIds = Object.keys(enemyDefinitions).filter((enemyTypeId) => discovered[enemyTypeId] === true);
+      if (!discoveredEnemyIds.length) return 0;
+
+      const enemyKillCounts = character.enemyKillCounts && typeof character.enemyKillCounts === "object"
+        ? character.enemyKillCounts
+        : {};
+      const bountyClaims = character.bountyClaims && typeof character.bountyClaims === "object"
+        ? character.bountyClaims
+        : {};
+
+      return discoveredEnemyIds.reduce((count, enemyTypeId) => {
+        const bountyProfile = window.RL_SAVE && typeof window.RL_SAVE.getBountyProfileForEnemy === "function"
+          ? window.RL_SAVE.getBountyProfileForEnemy(enemyTypeId)
+          : null;
+        if (!bountyProfile) return count;
+
+        const stepCount = Math.max(1, Math.floor(Number(bountyProfile.stepCount || 1)));
+        const claimedSteps = Math.max(0, Math.floor(Number(bountyClaims[enemyTypeId] || 0)));
+        if (claimedSteps >= stepCount) return count;
+
+        const steps = Array.isArray(bountyProfile.steps) ? bountyProfile.steps : [];
+        const nextStep = steps[Math.max(0, Math.min(steps.length - 1, claimedSteps))];
+        if (!nextStep) return count;
+
+        const target = Math.max(1, Math.floor(Number(nextStep.target || bountyProfile.target || 1)));
+        const current = Math.max(0, Math.floor(Number(enemyKillCounts[enemyTypeId] || 0)));
+        if (current >= target) {
+          return count + 1;
+        }
+        return count;
+      }, 0);
+    }
+
+    function getQuestClaimCounts(character) {
+      if (!character) {
+        return { main: 0, bounties: 0, total: 0 };
+      }
+      const mainQuestDefinitions = getMainQuestDefinitions();
+      const main = getClaimableMainQuestCount(character, mainQuestDefinitions);
+      const bounties = getClaimableBountyCount(character);
+      return {
+        main,
+        bounties,
+        total: main + bounties,
+        mainQuestDefinitions
+      };
+    }
+
     function renderCharacterDetails(character, options) {
       state.selectedCharacter = character || null;
       if (options && options.resetTab) {
@@ -447,6 +696,12 @@
       if (!character) {
         if (dom.classTabBtn) {
           dom.classTabBtn.textContent = "Attributes";
+        }
+        if (dom.skillsTabBtn) {
+          dom.skillsTabBtn.textContent = "Skills";
+        }
+        if (dom.questsTabBtn) {
+          dom.questsTabBtn.textContent = "Quests";
         }
         dom.characterSummary.innerHTML = "";
         dom.skillTreeContent.innerHTML = "";
@@ -460,6 +715,7 @@
         state.pendingDeleteCharacterId = null;
         setVisible(dom.deleteCharacterOverlay, false);
         renderLevelSelector(null, null);
+        renderDifficultySelector(null, null);
         return;
       }
 
@@ -484,7 +740,13 @@
         dom.classTabBtn.textContent =
           unspentAttributePoints > 0 ? `Attributes (${unspentAttributePoints})` : "Attributes";
       }
+      if (dom.questsTabBtn) {
+        const questCounts = getQuestClaimCounts(character);
+        dom.questsTabBtn.textContent =
+          questCounts.total > 0 ? `Quests (${questCounts.total})` : "Quests";
+      }
       renderLevelSelector(character, options || null);
+      renderDifficultySelector(character, options || null);
       renderCharacterSummary(character);
       setActiveSkillTab(state.activeSkillTab);
     }
@@ -545,12 +807,15 @@
 
     function setActiveSkillTab(tabName) {
       if (!state.selectedCharacter) return;
+      closeInventoryContextMenu();
       const merchantUnlocked = Boolean(
         state.selectedCharacter.merchantUnlocked ||
           (state.selectedCharacter.unlockedFeatures && state.selectedCharacter.unlockedFeatures.merchant)
       );
       if (tabName === "class") {
         state.activeSkillTab = "class";
+      } else if (tabName === "skills") {
+        state.activeSkillTab = "skills";
       } else if (tabName === "inventory") {
         state.activeSkillTab = "inventory";
       } else if (tabName === "merchant" && merchantUnlocked) {
@@ -564,6 +829,9 @@
       }
       dom.weaponsTabBtn.classList.toggle("active", state.activeSkillTab === "weapons");
       dom.classTabBtn.classList.toggle("active", state.activeSkillTab === "class");
+      if (dom.skillsTabBtn) {
+        dom.skillsTabBtn.classList.toggle("active", state.activeSkillTab === "skills");
+      }
       dom.inventoryTabBtn.classList.toggle("active", state.activeSkillTab === "inventory");
       if (dom.merchantTabBtn) {
         dom.merchantTabBtn.classList.toggle("active", state.activeSkillTab === "merchant");
@@ -578,6 +846,7 @@
     }
 
     function renderSkillTreeTab() {
+      closeInventoryContextMenu();
       dom.skillTreeContent.innerHTML = "";
       dom.skillTreeContent.classList.remove("inventory-content");
       dom.skillTreeContent.classList.remove("quest-content");
@@ -593,6 +862,8 @@
 
       if (state.activeSkillTab === "class") {
         renderClassTab(treeDefinition.classTree);
+      } else if (state.activeSkillTab === "skills") {
+        renderSkillsTab(state.selectedCharacter);
       } else if (state.activeSkillTab === "inventory") {
         dom.skillTreeContent.classList.add("inventory-content");
         renderInventoryTab(state.selectedCharacter);
@@ -822,6 +1093,121 @@
       dom.skillTreeContent.append(title, subtitle, panel);
     }
 
+    function getClassSkillConfiguration(character) {
+      const classId = character && (character.classId || character.class);
+      if (!classId) return null;
+      const allClassSkills = (window.RL_DATA && window.RL_DATA.CLASS_SKILLS) || {};
+      const config = allClassSkills[classId];
+      if (!config || !Array.isArray(config.skills)) return null;
+      return config;
+    }
+
+    function getClassSkillViewModels(character) {
+      const config = getClassSkillConfiguration(character);
+      if (!config) return [];
+      const classId = character && (character.classId || character.class);
+      return config.skills
+        .filter((skill) => {
+          if (!skill || typeof skill !== "object") return false;
+          const classIds = Array.isArray(skill.classIds) ? skill.classIds : [];
+          if (!classIds.length) return true;
+          return classIds.includes(classId);
+        })
+        .map((skill) => {
+          const unlockRunLevel = Math.max(1, Math.floor(Number(skill.unlockLegacyLevel || 1)));
+          return {
+            ...skill,
+            unlockRunLevel,
+            availableFromStart: unlockRunLevel <= 1
+          };
+        })
+        .sort((a, b) => a.unlockRunLevel - b.unlockRunLevel);
+    }
+
+    function renderSkillsTab(character) {
+      if (!character) return;
+      const config = getClassSkillConfiguration(character);
+      const skills = getClassSkillViewModels(character);
+      if (!config || !skills.length) {
+        dom.skillTreeContent.appendChild(
+          createElement("div", "skill-empty", "No class skills are configured for this character class.")
+        );
+        return;
+      }
+
+      const title = createElement("div", "skill-title", config.title || "Skills");
+      const subtitle = createElement(
+        "div",
+        "skill-subtitle",
+        config.subtitle || "Class-specific skills are chosen during run level-ups."
+      );
+      const panel = createElement("div", "class-skills-panel");
+      panel.appendChild(
+        createElement(
+          "div",
+          "class-skills-progress",
+          "Skills are not active by default. Buy them from level-up choices during a run."
+        )
+      );
+
+      const list = createElement("div", "class-skills-list");
+      skills.forEach((skill) => {
+        const card = createElement("article", "class-skill-card");
+        if (skill.availableFromStart) {
+          card.classList.add("class-skill-card-unlocked");
+        } else {
+          card.classList.add("class-skill-card-locked");
+        }
+
+        const header = createElement("div", "class-skill-head");
+        header.appendChild(createElement("div", "class-skill-name", skill.name || toTitle(skill.id)));
+        header.appendChild(
+          createElement(
+            "div",
+            "class-skill-state",
+            skill.availableFromStart
+              ? "Available from Run Start (via level-up choice)"
+              : `Appears at Run Level ${skill.unlockRunLevel}`
+          )
+        );
+        card.appendChild(header);
+
+        const metaParts = [];
+        if (skill.type) metaParts.push(toTitle(String(skill.type).replace(/_/g, " ")));
+        if (skill.category) metaParts.push(skill.category);
+        if (skill.currentLevel) metaParts.push(`Rank ${Math.max(1, Math.floor(Number(skill.currentLevel || 1)))}`);
+        card.appendChild(createElement("div", "class-skill-meta", metaParts.join(" | ")));
+
+        if (skill.description) {
+          card.appendChild(createElement("div", "class-skill-desc", skill.description));
+        }
+
+        if (skill.keybind) {
+          card.appendChild(createElement("div", "class-skill-keybind", `Keybind: ${skill.keybind}`));
+        }
+
+        const baseValues = skill.baseValues && typeof skill.baseValues === "object" ? skill.baseValues : null;
+        if (baseValues) {
+          const baseText = Object.entries(baseValues)
+            .map(([key, value]) => {
+              if (typeof value === "number") {
+                if (key.toLowerCase().includes("pct")) return `${toTitle(key)} ${Math.round(value * 100)}%`;
+                return `${toTitle(key)} ${value}`;
+              }
+              return `${toTitle(key)} ${value}`;
+            })
+            .join(" | ");
+          if (baseText) {
+            card.appendChild(createElement("div", "class-skill-base", `Base: ${baseText}`));
+          }
+        }
+
+        list.appendChild(card);
+      });
+      panel.appendChild(list);
+      dom.skillTreeContent.append(title, subtitle, panel);
+    }
+
     function getActiveStorageTabId(character) {
       const fallback = "general";
       if (!character) return fallback;
@@ -834,28 +1220,31 @@
       state.inventoryStorageTabByCharacter[character.id] = tabId;
     }
 
-    function getActiveMerchantTabId(character) {
-      const fallback = "buy";
-      if (!character) return fallback;
-      const fromState = state.merchantTabByCharacter[character.id];
-      return fromState === "sell" ? "sell" : fallback;
-    }
-
-    function setActiveMerchantTabId(character, tabId) {
-      if (!character) return;
-      state.merchantTabByCharacter[character.id] = tabId === "sell" ? "sell" : "buy";
-    }
-
     function getActiveMerchantBuyCategoryTabId(character) {
       const fallback = "weapons";
       if (!character) return fallback;
       const fromState = state.merchantBuyCategoryTabByCharacter[character.id];
-      return fromState === "armor" ? "armor" : fallback;
+      if (fromState === "armor") return "armor";
+      if (fromState === "utility") return "utility";
+      if (fromState === "buyback") return "buyback";
+      return fallback;
     }
 
     function setActiveMerchantBuyCategoryTabId(character, tabId) {
       if (!character) return;
-      state.merchantBuyCategoryTabByCharacter[character.id] = tabId === "armor" ? "armor" : "weapons";
+      if (tabId === "armor") {
+        state.merchantBuyCategoryTabByCharacter[character.id] = "armor";
+        return;
+      }
+      if (tabId === "utility") {
+        state.merchantBuyCategoryTabByCharacter[character.id] = "utility";
+        return;
+      }
+      if (tabId === "buyback") {
+        state.merchantBuyCategoryTabByCharacter[character.id] = "buyback";
+        return;
+      }
+      state.merchantBuyCategoryTabByCharacter[character.id] = "weapons";
     }
 
     function getActiveQuestViewTabId(character) {
@@ -896,7 +1285,6 @@
     function renderInventoryTab(character, options) {
       if (!character) return;
       const safeOptions = options || {};
-      const sellMode = !!safeOptions.sellMode;
       const onSellInventoryItem =
         typeof safeOptions.onSellInventoryItem === "function" ? safeOptions.onSellInventoryItem : handlers.onSellInventoryItem;
       const getSellPrice =
@@ -906,6 +1294,11 @@
           ? window.RL_SAVE.calculateMerchantSellPrice
           : null;
       const mountEl = safeOptions.mountEl || dom.skillTreeContent;
+      const merchantUnlocked = Boolean(
+        character.merchantUnlocked || (character.unlockedFeatures && character.unlockedFeatures.merchant)
+      );
+      const canUseInventorySellMenu =
+        merchantUnlocked && typeof onSellInventoryItem === "function" && typeof getSellPrice === "function";
 
       const inventory = character.inventory || {};
       const equipment = inventory.equipment || {};
@@ -936,6 +1329,57 @@
         return itemType ? itemType.label : "";
       };
 
+      const isWeaponItemType = (itemTypeId) => itemTypeId === "melee_weapon" || itemTypeId === "ranged_weapon";
+
+      const getMasteryText = (itemValue) => {
+        if (!itemValue || typeof itemValue !== "object" || !isWeaponItemType(itemValue.itemType)) return "";
+        const masteryConfig = (window.RL_DATA && window.RL_DATA.WEAPON_MASTERY) || {};
+        const rarityId = String(itemValue.rarity || "grey").trim().toLowerCase() || "grey";
+        const rawThresholds = masteryConfig.thresholdsByRarity && masteryConfig.thresholdsByRarity[rarityId];
+        const thresholds = Array.isArray(rawThresholds)
+          ? rawThresholds
+              .map((value) => Math.max(1, Math.floor(Number(value || 0))))
+              .filter((value) => Number.isFinite(value) && value > 0)
+          : [];
+        const normalizedThresholds = [];
+        thresholds.forEach((value) => {
+          if (!normalizedThresholds.length || value > normalizedThresholds[normalizedThresholds.length - 1]) {
+            normalizedThresholds.push(value);
+          }
+        });
+        if (!normalizedThresholds.length) {
+          normalizedThresholds.push(100);
+        }
+        const tierCapRaw = Number(masteryConfig.tiersByRarity && masteryConfig.tiersByRarity[rarityId]);
+        const tierCap = Math.max(
+          1,
+          Math.min(
+            normalizedThresholds.length,
+            Number.isNaN(tierCapRaw) ? normalizedThresholds.length : Math.floor(tierCapRaw)
+          )
+        );
+        const mastery = itemValue.mastery && typeof itemValue.mastery === "object" ? itemValue.mastery : {};
+        const killsTotal = Math.max(0, Math.floor(Number(mastery.killsTotal || 0)));
+        let tiersFromKills = 0;
+        for (let i = 0; i < normalizedThresholds.length && tiersFromKills < tierCap; i += 1) {
+          if (killsTotal >= normalizedThresholds[i]) {
+            tiersFromKills += 1;
+          } else {
+            break;
+          }
+        }
+        const explicitTiers = Math.max(0, Math.floor(Number(mastery.tiersUnlocked || 0)));
+        const tiersUnlocked = Math.max(0, Math.min(tierCap, Math.max(tiersFromKills, explicitTiers)));
+        const nextThresholdIndex = Math.min(tiersUnlocked, normalizedThresholds.length - 1);
+        const nextThreshold = Math.max(1, normalizedThresholds[nextThresholdIndex] || normalizedThresholds[0]);
+        const perTierBonusRaw = Number(
+          masteryConfig.perTierFlatBonusByRarity && masteryConfig.perTierFlatBonusByRarity[rarityId]
+        );
+        const perTierBonus = Number.isNaN(perTierBonusRaw) ? 1 : Math.max(0, Math.floor(perTierBonusRaw));
+        const totalBonus = tiersUnlocked * perTierBonus;
+        return `Mastery T${tiersUnlocked}/${tierCap} | ${killsTotal}/${nextThreshold} kills | +${totalBonus} dmg`;
+      };
+
       const normalizeStatKey = (statKey) => {
         if (statKey === "meleeDamageBonus") return "slashingDamageBonus";
         if (statKey === "rangedDamageBonus") return "piercingDamageBonus";
@@ -949,6 +1393,7 @@
         if (key === "slashingDamageBonus") return `+${amount} Slashing Damage`;
         if (key === "piercingDamageBonus") return `+${amount} Piercing Damage`;
         if (key === "bludgeoningDamageBonus") return `+${amount} Bludgeoning Damage`;
+        if (key === "baseWeaponDamage") return `+${amount} Base Weapon Damage`;
         if (key === "armor") return `+${amount} Armor`;
         if (key === "maxHpBonus") return `+${amount} Max HP`;
         if (key === "moveSpeedBonusPct") return `${amount >= 0 ? "+" : ""}${amount}% Move Speed`;
@@ -968,10 +1413,10 @@
 
       const getItemDisplay = (itemValue) => {
         if (!itemValue) {
-          return { name: "Empty", meta: "", stats: "", rarityTextClass: "" };
+          return { name: "Empty", meta: "", stats: "", mastery: "", rarityTextClass: "" };
         }
         if (typeof itemValue === "string") {
-          return { name: itemValue, meta: "", stats: "", rarityTextClass: "" };
+          return { name: itemValue, meta: "", stats: "", mastery: "", rarityTextClass: "" };
         }
         const name = itemValue.name || itemValue.templateId || "Item";
         const rarity = rarityLabel(itemValue.rarity);
@@ -986,7 +1431,8 @@
           : "";
         const metaParts = [rarity, type, weightLabel].filter(Boolean);
         const statText = getStatText(itemValue.stats);
-        return { name, meta: metaParts.join(" | "), stats: statText, rarityTextClass };
+        const masteryText = getMasteryText(itemValue);
+        return { name, meta: metaParts.join(" | "), stats: statText, mastery: masteryText, rarityTextClass };
       };
 
       const normalizeEquipmentSlotKey = (slotKey) => {
@@ -1118,9 +1564,9 @@
         createElement(
           "div",
           "skill-subtitle",
-          sellMode
-            ? "Double-click an equipped item to sell it to the merchant."
-            : "Equip items to enhance your character (coming soon)"
+          canUseInventorySellMenu
+            ? "Equip items to enhance your character. Right-click an item to sell."
+            : "Equip items to enhance your character."
         )
       );
 
@@ -1152,12 +1598,15 @@
           itemChip.draggable = true;
           itemChip.addEventListener("dragstart", (event) => startDrag(event, location));
           itemChip.addEventListener("dragend", () => clearDragState());
-          if (sellMode && onSellInventoryItem) {
+          if (canUseInventorySellMenu) {
             itemChip.classList.add("inventory-item-sellable");
-            itemChip.addEventListener("dblclick", (event) => {
+            itemChip.addEventListener("contextmenu", (event) => {
               event.preventDefault();
               event.stopPropagation();
-              onSellInventoryItem(location);
+              openInventoryContextMenu(event, {
+                sellPrice: getSellPrice(value),
+                onSell: () => onSellInventoryItem(location)
+              });
             });
           }
           const itemNameEl = createElement("div", "equipment-slot-value", display.name);
@@ -1171,9 +1620,8 @@
           if (display.stats) {
             itemChip.appendChild(createElement("div", "equipment-slot-stat", display.stats));
           }
-          if (sellMode && getSellPrice) {
-            const sellPrice = Math.max(1, Math.floor(Number(getSellPrice(value) || 0)));
-            itemChip.appendChild(createElement("div", "inventory-sell-value", `Sell: ${sellPrice}g`));
+          if (display.mastery) {
+            itemChip.appendChild(createElement("div", "equipment-slot-stat", display.mastery));
           }
           slotBox.appendChild(itemChip);
         } else {
@@ -1233,9 +1681,9 @@
         createElement(
           "div",
           "skill-subtitle",
-          sellMode
-            ? "Double-click a stored item to sell it. Sold items can be recovered from Merchant Buyback until your next run."
-            : "Items collected during your journey will appear here"
+          canUseInventorySellMenu
+            ? "Items collected during your journey will appear here. Right-click an item to sell."
+            : "Items collected during your journey will appear here."
         )
       );
 
@@ -1272,12 +1720,15 @@
           itemChip.draggable = true;
           itemChip.addEventListener("dragstart", (event) => startDrag(event, location));
           itemChip.addEventListener("dragend", () => clearDragState());
-          if (sellMode && onSellInventoryItem) {
+          if (canUseInventorySellMenu) {
             itemChip.classList.add("inventory-item-sellable");
-            itemChip.addEventListener("dblclick", (event) => {
+            itemChip.addEventListener("contextmenu", (event) => {
               event.preventDefault();
               event.stopPropagation();
-              onSellInventoryItem(location);
+              openInventoryContextMenu(event, {
+                sellPrice: getSellPrice(value),
+                onSell: () => onSellInventoryItem(location)
+              });
             });
           }
           const itemNameEl = createElement("div", "storage-slot-value", display.name);
@@ -1291,9 +1742,8 @@
           if (display.stats) {
             itemChip.appendChild(createElement("div", "storage-slot-stat", display.stats));
           }
-          if (sellMode && getSellPrice) {
-            const sellPrice = Math.max(1, Math.floor(Number(getSellPrice(value) || 0)));
-            itemChip.appendChild(createElement("div", "inventory-sell-value", `Sell: ${sellPrice}g`));
+          if (display.mastery) {
+            itemChip.appendChild(createElement("div", "storage-slot-stat", display.mastery));
           }
           slot.appendChild(itemChip);
         }
@@ -1319,12 +1769,7 @@
       const merchant = character.merchant || {};
       const stock = Array.isArray(merchant.stock) ? merchant.stock : [];
       const buyback = Array.isArray(merchant.buyback) ? merchant.buyback : [];
-      const refreshRuns = Math.max(1, Math.floor(Number(merchant.refreshRuns || 5)));
-      const runsSinceRefresh = Math.max(0, Math.floor(Number(merchant.runsSinceRefresh || 0)));
-      const runsUntilRefresh = Math.max(0, refreshRuns - runsSinceRefresh);
       const levelLabel = merchant.levelLabel || `Level ${merchant.level || 1} Merchant`;
-      const activeMerchantTabId = getActiveMerchantTabId(character);
-      setActiveMerchantTabId(character, activeMerchantTabId);
       const activeMerchantCategoryTabId = getActiveMerchantBuyCategoryTabId(character);
       setActiveMerchantBuyCategoryTabId(character, activeMerchantCategoryTabId);
 
@@ -1348,6 +1793,7 @@
             if (key === "slashingDamageBonus" || key === "meleeDamageBonus") return `+${amount} Slashing Damage`;
             if (key === "piercingDamageBonus" || key === "rangedDamageBonus") return `+${amount} Piercing Damage`;
             if (key === "bludgeoningDamageBonus") return `+${amount} Bludgeoning Damage`;
+            if (key === "baseWeaponDamage") return `+${amount} Base Weapon Damage`;
             if (key === "armor") return `+${amount} Armor`;
             if (key === "maxHpBonus") return `+${amount} Max HP`;
             if (key === "moveSpeedBonusPct") return `${amount >= 0 ? "+" : ""}${amount}% Move Speed`;
@@ -1358,6 +1804,57 @@
           })
           .filter(Boolean)
           .join(" | ");
+      };
+
+      const isWeaponItemType = (itemTypeId) => itemTypeId === "melee_weapon" || itemTypeId === "ranged_weapon";
+
+      const getMasteryText = (item) => {
+        if (!item || typeof item !== "object" || !isWeaponItemType(item.itemType)) return "";
+        const masteryConfig = (window.RL_DATA && window.RL_DATA.WEAPON_MASTERY) || {};
+        const rarityId = String(item.rarity || "grey").trim().toLowerCase() || "grey";
+        const rawThresholds = masteryConfig.thresholdsByRarity && masteryConfig.thresholdsByRarity[rarityId];
+        const thresholds = Array.isArray(rawThresholds)
+          ? rawThresholds
+              .map((value) => Math.max(1, Math.floor(Number(value || 0))))
+              .filter((value) => Number.isFinite(value) && value > 0)
+          : [];
+        const normalizedThresholds = [];
+        thresholds.forEach((value) => {
+          if (!normalizedThresholds.length || value > normalizedThresholds[normalizedThresholds.length - 1]) {
+            normalizedThresholds.push(value);
+          }
+        });
+        if (!normalizedThresholds.length) {
+          normalizedThresholds.push(100);
+        }
+        const tierCapRaw = Number(masteryConfig.tiersByRarity && masteryConfig.tiersByRarity[rarityId]);
+        const tierCap = Math.max(
+          1,
+          Math.min(
+            normalizedThresholds.length,
+            Number.isNaN(tierCapRaw) ? normalizedThresholds.length : Math.floor(tierCapRaw)
+          )
+        );
+        const mastery = item.mastery && typeof item.mastery === "object" ? item.mastery : {};
+        const killsTotal = Math.max(0, Math.floor(Number(mastery.killsTotal || 0)));
+        let tiersFromKills = 0;
+        for (let i = 0; i < normalizedThresholds.length && tiersFromKills < tierCap; i += 1) {
+          if (killsTotal >= normalizedThresholds[i]) {
+            tiersFromKills += 1;
+          } else {
+            break;
+          }
+        }
+        const explicitTiers = Math.max(0, Math.floor(Number(mastery.tiersUnlocked || 0)));
+        const tiersUnlocked = Math.max(0, Math.min(tierCap, Math.max(tiersFromKills, explicitTiers)));
+        const nextThresholdIndex = Math.min(tiersUnlocked, normalizedThresholds.length - 1);
+        const nextThreshold = Math.max(1, normalizedThresholds[nextThresholdIndex] || normalizedThresholds[0]);
+        const perTierBonusRaw = Number(
+          masteryConfig.perTierFlatBonusByRarity && masteryConfig.perTierFlatBonusByRarity[rarityId]
+        );
+        const perTierBonus = Number.isNaN(perTierBonusRaw) ? 1 : Math.max(0, Math.floor(perTierBonusRaw));
+        const totalBonus = tiersUnlocked * perTierBonus;
+        return `Mastery T${tiersUnlocked}/${tierCap} | ${killsTotal}/${nextThreshold} kills | +${totalBonus} dmg`;
       };
 
       const slotLabelMap = {
@@ -1375,57 +1872,81 @@
 
       const panel = createElement("div", "merchant-panel");
       panel.appendChild(createElement("div", "skill-title", "Merchant"));
-      panel.appendChild(createElement("div", "skill-subtitle", "Buy upgrades, sell inventory, and recover accidental sales."));
+      panel.appendChild(createElement("div", "skill-subtitle", "Buy upgrades and recover accidental sales from Buyback."));
 
       const summary = createElement("div", "merchant-summary");
       summary.appendChild(createElement("div", "merchant-summary-item", `${levelLabel}`));
+      const merchantLevel = Math.max(1, Math.floor(Number(merchant.level || 1)));
+      const merchantLevelCap = Math.max(1, Math.floor(Number(merchant.levelCap || 1)));
+      const reviveConsumableCharges = Math.max(0, Math.floor(Number(character.reviveConsumableCharges || 0)));
+      const healthPotionCharges = Math.max(0, Math.floor(Number(character.healthPotionCharges || 0)));
+      summary.appendChild(createElement("div", "merchant-summary-item", `Level: ${merchantLevel} / ${merchantLevelCap}`));
       summary.appendChild(createElement("div", "merchant-summary-item", `Gold: ${character.gold || 0}`));
       summary.appendChild(createElement("div", "merchant-summary-item", `Storage Free: ${freeStorageSlots}`));
-      summary.appendChild(createElement("div", "merchant-summary-item", `Refreshes every ${refreshRuns} runs`));
-      summary.appendChild(createElement("div", "merchant-summary-item", `Refresh in ${runsUntilRefresh} run${runsUntilRefresh === 1 ? "" : "s"}`));
+      summary.appendChild(
+        createElement("div", "merchant-summary-item", `Revive Sigil: ${reviveConsumableCharges > 0 ? "Ready" : "None"}`)
+      );
+      summary.appendChild(createElement("div", "merchant-summary-item", `Health Potions: ${healthPotionCharges}`));
+
+      const merchantXpIntoLevel = Math.max(0, Math.floor(Number(merchant.xpIntoLevel || 0)));
+      const merchantXpToNextLevel = Math.max(1, Math.floor(Number(merchant.xpToNextLevel || 1)));
+      const merchantXpProgress = merchantLevel >= merchantLevelCap ? 1 : Math.max(0, Math.min(1, merchantXpIntoLevel / merchantXpToNextLevel));
+      const merchantXpBlock = createElement("div", "merchant-xp-block");
+      const merchantXpHead = createElement("div", "merchant-xp-head");
+      merchantXpHead.appendChild(createElement("strong", "", "Merchant XP"));
+      merchantXpHead.appendChild(
+        createElement(
+          "span",
+          "",
+          merchantLevel >= merchantLevelCap
+            ? `Level cap reached (${merchantLevelCap})`
+            : `${merchantXpIntoLevel}/${merchantXpToNextLevel}`
+        )
+      );
+      merchantXpBlock.appendChild(merchantXpHead);
+      const merchantXpTrack = createElement("div", "merchant-xp-track");
+      const merchantXpFill = createElement("div", "merchant-xp-fill");
+      merchantXpFill.style.width = `${(merchantXpProgress * 100).toFixed(2)}%`;
+      merchantXpTrack.appendChild(merchantXpFill);
+      merchantXpBlock.appendChild(merchantXpTrack);
+      if (merchantLevel >= merchantLevelCap) {
+        merchantXpBlock.appendChild(
+          createElement("div", "merchant-xp-note", "Beat the current game level boss to raise the merchant cap.")
+        );
+      } else {
+        merchantXpBlock.appendChild(
+          createElement("div", "merchant-xp-note", "Buy or sell at the merchant to gain XP and improve stock quality.")
+        );
+      }
+      summary.appendChild(merchantXpBlock);
       panel.appendChild(summary);
 
-      const tabsRow = createElement("div", "merchant-mode-tabs");
-      [
-        { id: "buy", label: "Buy" },
-        { id: "sell", label: "Sell" }
-      ].forEach((tab) => {
-        const button = createElement("button", "btn merchant-mode-tab-btn", tab.label);
-        button.type = "button";
-        if (tab.id === activeMerchantTabId) {
-          button.classList.add("active");
-        }
-        button.addEventListener("click", () => {
-          setActiveMerchantTabId(character, tab.id);
-          renderSkillTreeTab();
-        });
-        tabsRow.appendChild(button);
-      });
-      panel.appendChild(tabsRow);
-
-      if (activeMerchantTabId === "sell") {
-        panel.appendChild(
-          createElement(
-            "div",
-            "skill-subtitle",
-            "Double-click any equipped or stored item to sell it. Sold items are available in Buyback until your next run."
-          )
-        );
-        renderInventoryTab(character, {
-          mountEl: panel,
-          sellMode: true,
-          onSellInventoryItem: (location) => {
-            if (!handlers.onSellInventoryItem) return;
-            handlers.onSellInventoryItem(location);
-          }
-        });
-        dom.skillTreeContent.appendChild(panel);
-        return;
-      }
-
       const buyCategoryDefinitions = [
-        { id: "weapons", label: "Weapons", itemTypes: ["melee_weapon", "ranged_weapon"] },
-        { id: "armor", label: "Armor", itemTypes: ["helmet", "chest", "leggings", "boots", "ring", "amulet"] }
+        {
+          id: "weapons",
+          label: "Weapons",
+          filterFn: (listing) => {
+            const itemType = listing && listing.item && listing.item.itemType;
+            return itemType === "melee_weapon" || itemType === "ranged_weapon";
+          }
+        },
+        {
+          id: "armor",
+          label: "Armor",
+          filterFn: (listing) => {
+            const itemType = listing && listing.item && listing.item.itemType;
+            return ["helmet", "chest", "leggings", "boots", "ring", "amulet"].includes(itemType);
+          }
+        },
+        {
+          id: "utility",
+          label: "Utility",
+          filterFn: (listing) => String((listing && listing.kind) || "").startsWith("consumable_")
+        },
+        {
+          id: "buyback",
+          label: "Buyback"
+        }
       ];
       const currentBuyCategory =
         buyCategoryDefinitions.find((category) => category.id === activeMerchantCategoryTabId) || buyCategoryDefinitions[0];
@@ -1446,9 +1967,84 @@
       });
       panel.appendChild(buyCategoryTabsRow);
 
+      if (currentBuyCategory.id === "buyback") {
+        const buybackGrid = createElement("div", "merchant-grid");
+        if (!buyback.length) {
+          buybackGrid.appendChild(createElement("div", "merchant-empty", "No items available for buyback."));
+        } else {
+          buyback.forEach((listing) => {
+            const item = listing.item || {};
+            const rarity = rarityMap[item.rarity] || null;
+            const type = itemTypes[item.itemType] || null;
+            const physical = physicalTypes[item.physicalDamageType] || null;
+            const allowedSlots = Array.isArray(item.allowedSlots) ? item.allowedSlots : [];
+            const slotLabel = allowedSlots.length
+              ? allowedSlots.map((slot) => slotLabelMap[slot] || toTitle(slot)).join(", ")
+              : "-";
+            const stats = getStatText(item) || "-";
+            const masteryText = getMasteryText(item);
+            const weightValue = Number(item.weaponSlotWeight);
+            const weightLabel =
+              (item.itemType === "melee_weapon" || item.itemType === "ranged_weapon") && !Number.isNaN(weightValue)
+                ? `${Math.max(1, Math.min(2, Math.floor(weightValue)))} Slot${Math.floor(weightValue) === 1 ? "" : "s"}`
+                : "";
+
+            const card = createElement("article", "merchant-card");
+            if (item.rarity) {
+              card.classList.add(`merchant-rarity-${String(item.rarity).toLowerCase()}`);
+            }
+            const itemName = createElement("div", "merchant-item-name", item.name || "Item");
+            const rarityTextClass = getRarityTextClass(item.rarity);
+            if (rarityTextClass) {
+              itemName.classList.add(rarityTextClass);
+            }
+            card.appendChild(itemName);
+            card.appendChild(
+              createElement(
+                "div",
+                "merchant-item-meta",
+                [rarity ? rarity.label : "", type ? type.label : "", weightLabel].filter(Boolean).join(" | ")
+              )
+            );
+            card.appendChild(createElement("div", "merchant-item-line", `Slot: ${slotLabel}`));
+            if (physical && physical.label) {
+              card.appendChild(createElement("div", "merchant-item-line", `Damage Type: ${physical.label}`));
+            }
+            card.appendChild(createElement("div", "merchant-item-line", `Stats: ${stats}`));
+            if (masteryText) {
+              card.appendChild(createElement("div", "merchant-item-line", masteryText));
+            }
+            card.appendChild(createElement("div", "merchant-price", `Buyback: ${listing.price || 0}g`));
+
+            const buybackButton = createElement("button", "btn merchant-buy-btn", "Buy Back");
+            buybackButton.type = "button";
+            const hasGold = (character.gold || 0) >= (listing.price || 0);
+            buybackButton.disabled = !hasGold || storageFull || !handlers.onBuybackMerchantItem;
+            buybackButton.addEventListener("click", () => {
+              if (!handlers.onBuybackMerchantItem) return;
+              handlers.onBuybackMerchantItem(listing.buybackId);
+            });
+            card.appendChild(buybackButton);
+
+            const reason = !hasGold
+              ? "Not enough gold"
+              : storageFull
+              ? "Storage is full"
+              : "";
+            if (reason) {
+              card.appendChild(createElement("div", "merchant-buy-reason", reason));
+            }
+
+            buybackGrid.appendChild(card);
+          });
+        }
+        panel.appendChild(buybackGrid);
+        dom.skillTreeContent.appendChild(panel);
+        return;
+      }
+
       const filteredStock = stock.filter((listing) => {
-        const itemType = listing && listing.item && listing.item.itemType;
-        return currentBuyCategory.itemTypes.includes(itemType);
+        return currentBuyCategory.filterFn(listing);
       });
 
       const list = createElement("div", "merchant-grid");
@@ -1458,13 +2054,65 @@
           "merchant-empty",
           stock.length
             ? `No ${currentBuyCategory.label.toLowerCase()} items are currently available in stock.`
-            : runsUntilRefresh > 0
-            ? `Merchant stock is sold out. New stock in ${runsUntilRefresh} run${runsUntilRefresh === 1 ? "" : "s"}.`
-            : "Merchant stock is preparing to refresh."
+            : "Merchant stock is sold out."
         );
         list.appendChild(empty);
       } else {
         filteredStock.forEach((listing) => {
+          const listingKind = String((listing && listing.kind) || "item");
+          if (listingKind.startsWith("consumable_")) {
+            const rarityTextClass = getRarityTextClass(listing.rarity);
+            const card = createElement("article", "merchant-card");
+            if (listing.rarity) {
+              card.classList.add(`merchant-rarity-${String(listing.rarity).toLowerCase()}`);
+            }
+            const itemName = createElement("div", "merchant-item-name", listing.name || "Consumable");
+            if (rarityTextClass) {
+              itemName.classList.add(rarityTextClass);
+            }
+            card.appendChild(itemName);
+            const maxOwned = Math.max(1, Math.floor(Number(listing.maxOwned || 1)));
+            const currentHeld =
+              listingKind === "consumable_health_potion"
+                ? Math.max(0, Math.floor(Number(character.healthPotionCharges || 0)))
+                : Math.max(0, Math.floor(Number(character.reviveConsumableCharges || 0)));
+            card.appendChild(createElement("div", "merchant-item-meta", `Consumable | Held ${currentHeld}/${maxOwned}`));
+            card.appendChild(
+              createElement(
+                "div",
+                "merchant-item-line",
+                listing.description ||
+                  (listingKind === "consumable_health_potion"
+                    ? "Use during a run to restore health."
+                    : "Consumed on death to revive and continue the run.")
+              )
+            );
+            card.appendChild(createElement("div", "merchant-price", `Price: ${listing.price || 0}g`));
+
+            const alreadyOwned = currentHeld >= maxOwned;
+            const hasGold = (character.gold || 0) >= (listing.price || 0);
+            const buyButton = createElement("button", "btn btn-primary merchant-buy-btn", "Buy");
+            buyButton.type = "button";
+            buyButton.disabled = !hasGold || alreadyOwned || !handlers.onBuyMerchantItem;
+            buyButton.addEventListener("click", () => {
+              if (!handlers.onBuyMerchantItem) return;
+              handlers.onBuyMerchantItem(listing.listingId);
+            });
+            card.appendChild(buyButton);
+
+            const reason = !hasGold
+              ? "Not enough gold"
+              : alreadyOwned
+              ? "Already at max carried"
+              : "";
+            if (reason) {
+              card.appendChild(createElement("div", "merchant-buy-reason", reason));
+            }
+
+            list.appendChild(card);
+            return;
+          }
+
           const item = listing.item || {};
           const rarity = rarityMap[item.rarity] || null;
           const type = itemTypes[item.itemType] || null;
@@ -1474,6 +2122,7 @@
             ? allowedSlots.map((slot) => slotLabelMap[slot] || toTitle(slot)).join(", ")
             : "-";
           const stats = getStatText(item) || "-";
+          const masteryText = getMasteryText(item);
           const weightValue = Number(item.weaponSlotWeight);
           const weightLabel =
             (item.itemType === "melee_weapon" || item.itemType === "ranged_weapon") && !Number.isNaN(weightValue)
@@ -1502,6 +2151,9 @@
             card.appendChild(createElement("div", "merchant-item-line", `Damage Type: ${physical.label}`));
           }
           card.appendChild(createElement("div", "merchant-item-line", `Stats: ${stats}`));
+          if (masteryText) {
+            card.appendChild(createElement("div", "merchant-item-line", masteryText));
+          }
           card.appendChild(createElement("div", "merchant-price", `Price: ${listing.price || 0}g`));
 
           const buyButton = createElement("button", "btn btn-primary merchant-buy-btn", "Buy");
@@ -1529,92 +2181,16 @@
 
       panel.appendChild(list);
 
-      const buybackSection = createElement("section", "merchant-buyback-section");
-      buybackSection.appendChild(createElement("div", "skill-title", "Buyback"));
-      buybackSection.appendChild(
-        createElement("div", "skill-subtitle", "Recover recently sold items. Buyback clears after each completed run.")
-      );
-
-      const buybackGrid = createElement("div", "merchant-grid");
-      if (!buyback.length) {
-        buybackGrid.appendChild(createElement("div", "merchant-empty", "No items available for buyback."));
-      } else {
-        buyback.forEach((listing) => {
-          const item = listing.item || {};
-          const rarity = rarityMap[item.rarity] || null;
-          const type = itemTypes[item.itemType] || null;
-          const physical = physicalTypes[item.physicalDamageType] || null;
-          const allowedSlots = Array.isArray(item.allowedSlots) ? item.allowedSlots : [];
-          const slotLabel = allowedSlots.length
-            ? allowedSlots.map((slot) => slotLabelMap[slot] || toTitle(slot)).join(", ")
-            : "-";
-          const stats = getStatText(item) || "-";
-          const weightValue = Number(item.weaponSlotWeight);
-          const weightLabel =
-            (item.itemType === "melee_weapon" || item.itemType === "ranged_weapon") && !Number.isNaN(weightValue)
-              ? `${Math.max(1, Math.min(2, Math.floor(weightValue)))} Slot${Math.floor(weightValue) === 1 ? "" : "s"}`
-              : "";
-
-          const card = createElement("article", "merchant-card");
-          if (item.rarity) {
-            card.classList.add(`merchant-rarity-${String(item.rarity).toLowerCase()}`);
-          }
-          const itemName = createElement("div", "merchant-item-name", item.name || "Item");
-          const rarityTextClass = getRarityTextClass(item.rarity);
-          if (rarityTextClass) {
-            itemName.classList.add(rarityTextClass);
-          }
-          card.appendChild(itemName);
-          card.appendChild(
-            createElement(
-              "div",
-              "merchant-item-meta",
-              [rarity ? rarity.label : "", type ? type.label : "", weightLabel].filter(Boolean).join(" | ")
-            )
-          );
-          card.appendChild(createElement("div", "merchant-item-line", `Slot: ${slotLabel}`));
-          if (physical && physical.label) {
-            card.appendChild(createElement("div", "merchant-item-line", `Damage Type: ${physical.label}`));
-          }
-          card.appendChild(createElement("div", "merchant-item-line", `Stats: ${stats}`));
-          card.appendChild(createElement("div", "merchant-price", `Buyback: ${listing.price || 0}g`));
-
-          const buybackButton = createElement("button", "btn merchant-buy-btn", "Buy Back");
-          buybackButton.type = "button";
-          const hasGold = (character.gold || 0) >= (listing.price || 0);
-          buybackButton.disabled = !hasGold || storageFull || !handlers.onBuybackMerchantItem;
-          buybackButton.addEventListener("click", () => {
-            if (!handlers.onBuybackMerchantItem) return;
-            handlers.onBuybackMerchantItem(listing.buybackId);
-          });
-          card.appendChild(buybackButton);
-
-          const reason = !hasGold
-            ? "Not enough gold"
-            : storageFull
-            ? "Storage is full"
-            : "";
-          if (reason) {
-            card.appendChild(createElement("div", "merchant-buy-reason", reason));
-          }
-
-          buybackGrid.appendChild(card);
-        });
-      }
-
-      buybackSection.appendChild(buybackGrid);
-      panel.appendChild(buybackSection);
       dom.skillTreeContent.appendChild(panel);
     }
 
     function renderQuestsTab(character) {
       if (!character) return;
 
-      const questsConfig = (window.RL_DATA && window.RL_DATA.QUESTS) || {};
-      const questDefinitions = Object.values(questsConfig).reduce((list, entry) => {
-        if (!Array.isArray(entry)) return list;
-        return list.concat(entry.filter((quest) => quest && typeof quest === "object" && quest.id));
-      }, []).filter((quest) => quest.availableFromStart !== false);
+      const questCounts = getQuestClaimCounts(character);
+      const questDefinitions = Array.isArray(questCounts.mainQuestDefinitions)
+        ? questCounts.mainQuestDefinitions
+        : getMainQuestDefinitions();
       const activeQuestViewTabId = getActiveQuestViewTabId(character);
       setActiveQuestViewTabId(character, activeQuestViewTabId);
 
@@ -1622,8 +2198,14 @@
 
       const tabsRow = createElement("div", "quest-mode-tabs");
       [
-        { id: "quests", label: "Main" },
-        { id: "bounties", label: "Bounties" }
+        {
+          id: "quests",
+          label: questCounts.main > 0 ? `Main (${questCounts.main})` : "Main"
+        },
+        {
+          id: "bounties",
+          label: questCounts.bounties > 0 ? `Bounties (${questCounts.bounties})` : "Bounties"
+        }
       ].forEach((tab) => {
         const button = createElement("button", "btn quest-mode-tab-btn", tab.label);
         button.type = "button";
@@ -1671,6 +2253,9 @@
         const bountyClaims = character.bountyClaims && typeof character.bountyClaims === "object"
           ? character.bountyClaims
           : {};
+        const bountyDamageBonuses = character.bountyDamageBonuses && typeof character.bountyDamageBonuses === "object"
+          ? character.bountyDamageBonuses
+          : {};
         const cards = createElement("div", "quest-list");
 
         discoveredEnemyIds.forEach((enemyTypeId) => {
@@ -1680,39 +2265,57 @@
             : null;
           if (!bountyProfile) return;
 
-          const target = Math.max(1, Math.floor(Number(bountyProfile.target || 1)));
           const current = Math.max(0, Math.floor(Number(enemyKillCounts[enemyTypeId] || 0)));
-          const progress = Math.min(target, current);
+          const stepCount = Math.max(1, Math.floor(Number(bountyProfile.stepCount || 1)));
+          const claimedSteps = Math.max(0, Math.floor(Number(bountyClaims[enemyTypeId] || 0)));
+          const steps = Array.isArray(bountyProfile.steps) ? bountyProfile.steps : [];
+          const completedAllSteps = claimedSteps >= stepCount;
+          const nextStep = completedAllSteps
+            ? null
+            : steps[Math.max(0, Math.min(steps.length - 1, claimedSteps))];
+          const activeStep = nextStep || steps[Math.max(0, Math.min(steps.length - 1, stepCount - 1))] || null;
+          const target = Math.max(1, Math.floor(Number(activeStep && activeStep.target ? activeStep.target : bountyProfile.target || 1)));
+          const progress = completedAllSteps ? target : Math.min(target, current);
           const progressPct = target > 0 ? (progress / target) * 100 : 0;
-          const completed = current >= target;
-          const claimed = bountyClaims[enemyTypeId] === true;
-          const rarityLabel = toTitle(bountyProfile.rewardRarity || "blue");
-          const rewardItemCount = Math.max(1, Math.floor(Number(bountyProfile.rewardItemCount || 1)));
+          const completed = Boolean(nextStep && current >= target);
+          const cumulativeBonusPct = Math.max(
+            0,
+            Math.round(Number(bountyDamageBonuses[enemyTypeId] || 0) * 1000) / 10
+          );
 
           let statusText = "In Progress";
-          if (claimed) {
-            statusText = "Claimed";
+          if (completedAllSteps) {
+            statusText = "Completed";
           } else if (completed) {
-            statusText = "Complete - Reward Ready";
+            statusText = `Step ${claimedSteps + 1}/${stepCount} Complete - Reward Ready`;
           }
 
           const enemyLabel = enemy.label || toTitle(enemyTypeId);
           const card = createElement("article", "quest-card");
-          if (claimed) {
+          if (completedAllSteps) {
             card.classList.add("quest-card-claimed");
           } else if (completed) {
             card.classList.add("quest-card-ready");
           }
 
           card.appendChild(createElement("div", "quest-title", `${enemyLabel} Bounty`));
+          if (nextStep) {
+            card.appendChild(createElement("div", "quest-desc", `Step ${nextStep.step}/${stepCount}`));
+          } else {
+            card.appendChild(createElement("div", "quest-desc", `All ${stepCount} steps claimed.`));
+          }
           card.appendChild(
             createElement(
               "div",
               "quest-desc",
-              `Defeat ${target} ${enemyLabel}${target === 1 ? "" : "s"}.`
+              completedAllSteps
+                ? `Final target reached: ${target} ${enemyLabel}${target === 1 ? "" : "s"}.`
+                : `Defeat ${target} ${enemyLabel}${target === 1 ? "" : "s"} for the next claim.`
             )
           );
           card.appendChild(createElement("div", "quest-progress-text", `${progress} / ${target} Defeated`));
+          card.appendChild(createElement("div", "quest-progress-text", `Total Defeated: ${current}`));
+          card.appendChild(createElement("div", "quest-progress-text", `Damage Bonus vs ${enemyLabel}: +${cumulativeBonusPct}%`));
 
           const track = createElement("div", "quest-progress-track");
           const fill = createElement("div", "quest-progress-fill");
@@ -1720,16 +2323,31 @@
           track.appendChild(fill);
           card.appendChild(track);
 
-          card.appendChild(
-            createElement(
-              "div",
-              "quest-reward",
-              `Reward: ${rewardItemCount} ${rarityLabel} item${rewardItemCount === 1 ? "" : "s"}`
-            )
-          );
+          if (nextStep) {
+            const rewardXp = Math.max(0, Math.floor(Number(nextStep.xpReward || 0)));
+            const rewardDamageBonusPct = Math.max(0, Math.round(Number(nextStep.damageBonusPct || 0) * 1000) / 10);
+            const rewardRarityLabel = toTitle(nextStep.rewardRarity || bountyProfile.rewardRarity || "purple");
+            const rewardItemCount = Math.max(0, Math.floor(Number(nextStep.rewardItemCount || 0)));
+            let rewardText = `Reward: +${rewardDamageBonusPct}% damage vs ${enemyLabel}`;
+            if (rewardXp > 0) {
+              rewardText += ` + ${rewardXp} XP`;
+            }
+            if (nextStep.grantsItem && rewardItemCount > 0) {
+              rewardText += ` + ${rewardItemCount} ${rewardRarityLabel} item${rewardItemCount === 1 ? "" : "s"}`;
+            }
+            card.appendChild(createElement("div", "quest-reward", rewardText));
+          } else {
+            card.appendChild(
+              createElement(
+                "div",
+                "quest-reward",
+                `Bounty line complete. Final reward rarity: ${toTitle(bountyProfile.rewardRarity || "purple")}`
+              )
+            );
+          }
           card.appendChild(createElement("div", "quest-status", `Status: ${statusText}`));
 
-          if (!claimed) {
+          if (!completedAllSteps && nextStep) {
             const claimButton = createElement("button", "btn quest-claim-btn", "Claim Reward");
             claimButton.type = "button";
             claimButton.disabled = !completed || !handlers.onClaimBountyReward;
@@ -1739,7 +2357,7 @@
             });
             card.appendChild(claimButton);
           } else {
-            card.appendChild(createElement("div", "quest-claimed-note", "Reward claimed"));
+            card.appendChild(createElement("div", "quest-claimed-note", "All bounty rewards claimed"));
           }
 
           cards.appendChild(card);
@@ -2278,9 +2896,13 @@
     function updateHud(hud) {
       const hpCurrent = Math.max(0, Math.ceil(hud.hp || 0));
       const hpMax = Math.max(1, Math.ceil(hud.maxHp || 0));
+      const healthPotionCharges = Math.max(0, Math.floor(Number(hud.healthPotionCharges || 0)));
       dom.hudName.textContent = hud.name || "-";
       dom.hudHp.textContent = `HP: ${hpCurrent}/${hpMax}`;
       dom.healthHudLabel.textContent = `HP: ${hpCurrent}/${hpMax}`;
+      if (dom.healthPotionHudLabel) {
+        dom.healthPotionHudLabel.textContent = `Potions (Q): ${healthPotionCharges}`;
+      }
       dom.hudLevel.textContent = `Level: ${hud.level || 1}`;
       dom.hudGold.textContent = `Gold: ${hud.gold || 0}`;
       dom.hudLegacy.textContent = `Legacy XP: ${hud.legacy || 0}`;
@@ -2291,7 +2913,13 @@
       dom.hudRage.textContent = rageActive
         ? `Rage: ${Math.floor(rageCurrent)}/${Math.floor(rageMax)} (Active ${rageSeconds.toFixed(1)}s)`
         : `Rage: ${Math.floor(rageCurrent)}/${Math.floor(rageMax)}`;
-      dom.hudTimer.textContent = formatTime(hud.time || 0);
+      const timerText = formatTime(hud.time || 0);
+      if (dom.roundTimerHudLabel) {
+        dom.roundTimerHudLabel.textContent = timerText;
+      }
+      if (dom.hudTimer) {
+        dom.hudTimer.textContent = timerText;
+      }
       const rageProgress = Math.max(0, Math.min(1, rageCurrent / rageMax));
       dom.rageFill.style.width = `${(rageProgress * 100).toFixed(2)}%`;
       dom.rageFill.classList.toggle("active", rageActive);
@@ -2334,6 +2962,7 @@
       const rows = [
         `Character: ${summary.characterName}`,
         `Level completed: ${summary.levelLabel || "Level 1"}`,
+        `Difficulty: D${Math.max(1, Math.floor(Number(summary.completedDifficulty || 1)))}`,
         `Time survived: ${formatTime(summary.timeSurvived)}`,
         `Enemies defeated: ${summary.enemiesKilled}`,
         `Gold earned: ${summary.goldEarned}`,

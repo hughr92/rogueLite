@@ -114,6 +114,12 @@ input {
   background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
 }
 
+.level-selector-btn.locked {
+  opacity: 0.52;
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
 .home-actions {
   display: flex;
   gap: 0.65rem;
@@ -321,6 +327,50 @@ input {
   font-size: 0.84rem;
 }
 
+.merchant-xp-block {
+  grid-column: 1 / -1;
+  border: 1px solid #4b5f86;
+  border-radius: 9px;
+  background: rgba(12, 20, 33, 0.72);
+  padding: 0.42rem 0.52rem;
+  display: grid;
+  gap: 0.26rem;
+}
+
+.merchant-xp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #d7e3fd;
+  font-size: 0.78rem;
+}
+
+.merchant-xp-head strong {
+  color: #f2f7ff;
+  font-size: 0.84rem;
+}
+
+.merchant-xp-track {
+  width: 100%;
+  height: 9px;
+  border: 1px solid #4b5a79;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(7, 11, 18, 0.78);
+}
+
+.merchant-xp-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #72b6ff 0%, #4f8eff 100%);
+}
+
+.merchant-xp-note {
+  color: #9fb0d1;
+  font-size: 0.73rem;
+}
+
 .merchant-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -343,6 +393,11 @@ input {
 .merchant-rarity-blue {
   border-color: rgba(95, 146, 239, 0.85);
   box-shadow: inset 0 0 0 1px rgba(70, 126, 230, 0.28);
+}
+
+.merchant-rarity-purple {
+  border-color: rgba(164, 112, 235, 0.88);
+  box-shadow: inset 0 0 0 1px rgba(173, 127, 240, 0.26);
 }
 
 .merchant-item-name {
@@ -403,15 +458,6 @@ input {
   background: rgba(13, 18, 29, 0.62);
   color: #c2cee6;
   font-size: 0.88rem;
-}
-
-.merchant-buyback-section {
-  border: 1px solid #4f5a79;
-  border-radius: 10px;
-  padding: 0.7rem;
-  background: rgba(15, 22, 34, 0.72);
-  display: grid;
-  gap: 0.58rem;
 }
 
 .quest-panel {
@@ -634,7 +680,7 @@ input {
 }
 
 .inventory-item-sellable {
-  cursor: pointer;
+  cursor: context-menu;
 }
 
 .inventory-item-sellable:hover {
@@ -649,6 +695,33 @@ input {
 .inventory-sell-value {
   color: #ffb78b;
   font-size: 0.68rem;
+}
+
+.inventory-context-menu {
+  position: fixed;
+  z-index: 2500;
+  min-width: 130px;
+  padding: 0.3rem;
+  border: 1px solid #6f7fa5;
+  border-radius: 8px;
+  background: rgba(13, 19, 31, 0.97);
+  box-shadow: 0 12px 28px rgba(2, 6, 14, 0.55);
+}
+
+.inventory-context-menu-item {
+  width: 100%;
+  border: 1px solid #7486ad;
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  background: rgba(27, 38, 58, 0.96);
+  color: #e3e9f6;
+  text-align: left;
+  cursor: pointer;
+}
+
+.inventory-context-menu-item:hover {
+  border-color: #d28470;
+  background: rgba(57, 35, 31, 0.95);
 }
 
 .slot-head {
@@ -1253,6 +1326,75 @@ input {
   font-size: 0.8rem;
 }
 
+.class-skills-panel {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.class-skills-progress {
+  font-size: 0.82rem;
+  color: #c7d7f0;
+  border: 1px solid #425980;
+  border-radius: 8px;
+  background: rgba(30, 44, 68, 0.55);
+  padding: 0.42rem 0.56rem;
+}
+
+.class-skills-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.class-skill-card {
+  border-radius: 10px;
+  border: 1px solid #41597d;
+  background: rgba(20, 29, 45, 0.72);
+  padding: 0.58rem 0.62rem;
+  display: grid;
+  gap: 0.34rem;
+}
+
+.class-skill-card-unlocked {
+  border-color: rgba(106, 201, 141, 0.65);
+}
+
+.class-skill-card-locked {
+  opacity: 0.9;
+}
+
+.class-skill-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+
+.class-skill-name {
+  font-weight: 700;
+  color: #eef4ff;
+}
+
+.class-skill-state {
+  font-size: 0.76rem;
+  color: #afc4e5;
+}
+
+.class-skill-meta {
+  font-size: 0.78rem;
+  color: #bed0eb;
+}
+
+.class-skill-desc {
+  font-size: 0.8rem;
+  color: #d7e4f9;
+}
+
+.class-skill-keybind,
+.class-skill-base {
+  font-size: 0.76rem;
+  color: #aec4e8;
+}
+
 .character-list {
   display: grid;
   gap: 0.6rem;
@@ -1512,11 +1654,31 @@ input {
   background: #10141d;
 }
 
+.round-timer-hud {
+  position: absolute;
+  top: 0.65rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  pointer-events: none;
+  border: 1px solid #556a8f;
+  border-radius: 999px;
+  background: rgba(16, 23, 36, 0.9);
+  color: #f2f7ff;
+  font-size: 1.08rem;
+  font-weight: bold;
+  letter-spacing: 0.05em;
+  padding: 0.28rem 0.86rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
 .health-hud {
   position: absolute;
-  top: 0.7rem;
-  right: 0.7rem;
-  width: min(360px, 42vw);
+  bottom: 0.85rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, 58vw);
   z-index: 4;
   pointer-events: none;
   display: grid;
@@ -1527,6 +1689,13 @@ input {
   justify-self: end;
   font-size: 0.84rem;
   color: #ffd8dc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.health-potion-hud-label {
+  justify-self: end;
+  font-size: 0.77rem;
+  color: #ffe3a6;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
@@ -1730,9 +1899,16 @@ input {
   }
 
   .health-hud {
-    top: 0.6rem;
-    right: 0.6rem;
-    width: min(320px, 56vw);
+    bottom: 0.6rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(360px, 82vw);
+  }
+
+  .round-timer-hud {
+    top: 0.52rem;
+    font-size: 0.98rem;
+    padding: 0.24rem 0.72rem;
   }
 
   .item-reference-toggle {

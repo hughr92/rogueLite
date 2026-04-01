@@ -1,0 +1,41 @@
+{
+  "id": "level_1_intentional",
+  "name": "Level 1 Intentional Layout",
+  "width": 2200,
+  "height": 1500,
+  "defaultThemeId": "forest",
+  "terrainObjects": [
+    { "id": "terrain_a1", "type": "rock", "x": 340, "y": 420, "rotation": 0, "scale": 1.2 },
+    { "id": "terrain_a2", "type": "tree", "x": 410, "y": 505, "rotation": 0, "scale": 1.1 },
+    { "id": "terrain_a3", "type": "debris", "x": 560, "y": 450, "rotation": 0, "scale": 1.3 },
+    { "id": "terrain_b1", "type": "pillar", "x": 1220, "y": 840, "rotation": 0, "scale": 1.1 },
+    { "id": "terrain_b2", "type": "crate", "x": 1300, "y": 910, "rotation": 0, "scale": 1.2 },
+    { "id": "terrain_b3", "type": "stump", "x": 1460, "y": 860, "rotation": 0, "scale": 1.05 }
+  ],
+  "boundaries": [
+    {
+      "id": "boundary_river_1",
+      "blocksPlayer": true,
+      "blocksEnemies": true,
+      "polygonPoints": [
+        { "x": 660, "y": 0 },
+        { "x": 870, "y": 0 },
+        { "x": 1220, "y": 310 },
+        { "x": 1360, "y": 620 },
+        { "x": 1160, "y": 920 },
+        { "x": 980, "y": 1180 },
+        { "x": 760, "y": 1500 },
+        { "x": 520, "y": 1500 },
+        { "x": 700, "y": 1180 },
+        { "x": 890, "y": 900 },
+        { "x": 980, "y": 660 },
+        { "x": 920, "y": 420 },
+        { "x": 700, "y": 140 }
+      ]
+    }
+  ],
+  "crossings": [
+    { "id": "crossing_north", "type": "bridge", "x": 812, "y": 225, "orientation": 43, "width": 102, "length": 30 },
+    { "id": "crossing_mid", "type": "bridge", "x": 1005, "y": 790, "orientation": 104, "width": 96, "length": 30 }
+  ]
+}

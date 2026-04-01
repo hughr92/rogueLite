@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RL Map Editor (MVP)</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="editor-root">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1>Map Editor</h1>
+        <p>Standalone layout tool for intentional level design</p>
+      </div>
+      <div class="topbar-actions">
+        <label for="levelEditSelect" class="topbar-inline-label">Editing Level</label>
+        <select id="levelEditSelect" class="input level-edit-select"></select>
+        <button id="newMapBtn" class="btn">New</button>
+        <button id="openFileBtn" class="btn">Open File</button>
+        <input id="openFileInput" class="hidden" type="file" accept="application/json,.json">
+        <button id="saveFileBtn" class="btn btn-primary">Save File</button>
+        <button id="copyJsonBtn" class="btn">Copy JSON</button>
+        <button id="saveLocalBtn" class="btn">Save Local</button>
+        <select id="localMapSelect" class="input local-select"></select>
+        <button id="loadLocalBtn" class="btn">Load Local</button>
+        <button id="validateBtn" class="btn">Validate</button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <aside class="left-panel panel">
+        <h2>Tools</h2>
+        <div class="tool-grid" id="toolButtons">
+          <button data-tool="select" class="btn tool-btn active">Select</button>
+          <button data-tool="terrain" class="btn tool-btn">Terrain</button>
+          <button data-tool="boundary" class="btn tool-btn">Boundary</button>
+          <button data-tool="crossing" class="btn tool-btn">Crossing</button>
+          <button data-tool="delete" class="btn tool-btn">Delete</button>
+        </div>
+
+        <div class="field-block">
+          <label for="terrainTypeSelect">Terrain Type</label>
+          <select id="terrainTypeSelect" class="input"></select>
+        </div>
+
+        <div class="field-block">
+          <label for="themePreviewSelect">Theme Preview</label>
+          <select id="themePreviewSelect" class="input"></select>
+        </div>
+
+        <div class="row">
+          <label><input type="checkbox" id="gridVisibleChk" checked> Show Grid</label>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="snapEnabledChk"> Snap To Grid</label>
+        </div>
+
+        <div class="field-block compact">
+          <label for="gridSizeInput">Grid Size</label>
+          <input id="gridSizeInput" class="input" type="number" min="8" step="1" value="32">
+        </div>
+
+        <div class="help-block">
+          <h3>Canvas Controls</h3>
+          <p><strong>Pan:</strong> middle mouse drag or hold <code>Space</code> + drag</p>
+          <p><strong>Zoom:</strong> mouse wheel</p>
+          <p><strong>Duplicate:</strong> <code>Ctrl + D</code></p>
+          <p><strong>Delete:</strong> <code>Delete</code> key</p>
+          <p><strong>Boundary:</strong> click points, double-click to finish</p>
+        </div>
+      </aside>
+
+      <section class="canvas-shell panel">
+        <canvas id="mapCanvas"></canvas>
+        <div id="canvasOverlay" class="canvas-overlay">
+          <span id="modeLabel">Tool: Select</span>
+          <span id="coordsLabel">World: 0, 0</span>
+          <span id="zoomLabel">Zoom: 100%</span>
+        </div>
+      </section>
+
+      <aside class="right-panel panel">
+        <h2>Properties</h2>
+        <div class="field-block">
+          <label for="mapIdInput">Map ID</label>
+          <input id="mapIdInput" class="input" type="text">
+        </div>
+        <div class="field-block">
+          <label for="mapNameInput">Map Name</label>
+          <input id="mapNameInput" class="input" type="text">
+        </div>
+        <div class="field-block compact">
+          <label for="mapWidthInput">Map Width</label>
+          <input id="mapWidthInput" class="input" type="number" min="200" step="10">
+        </div>
+        <div class="field-block compact">
+          <label for="mapHeightInput">Map Height</label>
+          <input id="mapHeightInput" class="input" type="number" min="200" step="10">
+        </div>
+        <div class="field-block">
+          <label for="defaultThemeInput">Default Theme</label>
+          <select id="defaultThemeInput" class="input"></select>
+        </div>
+        <hr>
+        <div id="selectionProperties" class="selection-properties">
+          <p class="muted">Select an object to edit position, type, and dimensions.</p>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="statusbar">
+      <div id="statusText">Ready.</div>
+      <div id="validationText"></div>
+    </footer>
+  </div>
+
+  <script src="editor.js"></script>
+</body>
+</html>

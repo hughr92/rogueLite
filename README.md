@@ -10,6 +10,7 @@ Local-only browser roguelike survival prototype built with HTML, CSS, and vanill
 - `save.js` - localStorage character persistence
 - `ui.js` - DOM/UI controller for menus and overlays
 - `game.js` - game loop, combat, enemy AI, progression, rewards
+- `tools/map-editor/` - standalone map editor app for intentional layout authoring
 
 ## Run Locally
 
@@ -24,6 +25,12 @@ Home screen includes a read-only skill tree panel with tabs:
   - supports drag-and-drop moving between equipment and storage slots
 
 No backend, package install, or build step is required.
+
+## Map Editor
+
+Open `tools/map-editor/index.html` in a browser to launch the standalone map editor.
+
+Editor outputs JSON map files with layout data (terrain, boundaries, crossings) and a theme ID for runtime rendering.
 
 ## Tuning Guide
 

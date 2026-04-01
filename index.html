@@ -16,6 +16,10 @@
           <div class="level-selector-title">Level Select</div>
           <div id="levelSelector" class="level-selector"></div>
         </div>
+        <div class="level-selector-block">
+          <div class="level-selector-title">Difficulty</div>
+          <div id="difficultySelector" class="level-selector"></div>
+        </div>
         <div class="home-actions">
           <button id="createCharacterBtn" class="btn">Create Character</button>
           <button id="startRunBtn" class="btn btn-primary" disabled>Start Run</button>
@@ -40,6 +44,7 @@
             <div class="skill-tabs">
               <button id="weaponsTabBtn" class="btn skill-tab active" type="button">Weapons</button>
               <button id="classTabBtn" class="btn skill-tab" type="button">Attributes</button>
+              <button id="skillsTabBtn" class="btn skill-tab" type="button">Skills</button>
               <button id="inventoryTabBtn" class="btn skill-tab" type="button">Inventory</button>
               <button id="merchantTabBtn" class="btn skill-tab" type="button">Merchant</button>
               <button id="questsTabBtn" class="btn skill-tab" type="button">Quests</button>
@@ -53,11 +58,15 @@
 
     <section id="gameScreen" class="screen hidden">
       <canvas id="gameCanvas"></canvas>
+      <div id="roundTimerHud" class="round-timer-hud">
+        <span id="roundTimerHudLabel">00:00</span>
+      </div>
       <div id="healthHud" class="health-hud">
         <div id="healthHudLabel" class="health-hud-label">HP: 0/0</div>
         <div class="health-track">
           <div id="healthFill" class="health-fill"></div>
         </div>
+        <div id="healthPotionHudLabel" class="health-potion-hud-label">Potions (Q): 0</div>
       </div>
       <div id="hud" class="hud">
         <div class="hud-row">
@@ -67,7 +76,6 @@
           <span id="hudGold">Gold: 0</span>
           <span id="hudLegacy">Legacy XP: 0</span>
           <span id="hudRage">Rage: 0/100</span>
-          <span id="hudTimer">00:00</span>
         </div>
         <div class="rage-track">
           <div id="rageFill" class="rage-fill"></div>

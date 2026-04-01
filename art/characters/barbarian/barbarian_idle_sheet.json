@@ -1,0 +1,17 @@
+{
+  "animationName": "barbarian_idle",
+  "sourceImage": "barbarian_master_v1_sheet.png",
+  "frameWidth": 313,
+  "frameHeight": 378,
+  "frameCount": 4,
+  "loop": true,
+  "loopOrder": [0, 1, 0, 2, 0, 3],
+  "spacing": 0,
+  "margin": 0,
+  "frames": [
+    { "index": 0, "x": 100, "y": 293, "w": 310, "h": 378, "duration": 120 },
+    { "index": 1, "x": 453, "y": 329, "w": 306, "h": 342, "duration": 120 },
+    { "index": 2, "x": 802, "y": 294, "w": 313, "h": 377, "duration": 120 },
+    { "index": 3, "x": 1161, "y": 296, "w": 310, "h": 376, "duration": 120 }
+  ]
+}

@@ -57,6 +57,48 @@
       preferredRange: 230,
       projectileSpeed: 215
     },
+    trishot: {
+      id: "trishot",
+      label: "Volley Shaman",
+      behavior: "tri_ranged",
+      bountyLevel: 2,
+      bountyTarget: 65,
+      bountyRewardItemCount: 1,
+      color: "#8c79ff",
+      radius: 13,
+      hp: 34,
+      damage: 14,
+      resistances: ["piercing"],
+      weaknesses: ["slashing"],
+      speed: 50,
+      xpDrop: 18,
+      goldChance: 0.24,
+      goldDrop: 2,
+      shotCooldown: 2.9,
+      preferredRange: 250,
+      projectileSpeed: 190,
+      spreadRadians: 0.32,
+      sideProjectileDamageScale: 0.82
+    },
+    shieldbearer: {
+      id: "shieldbearer",
+      label: "Bulwark",
+      behavior: "chaser",
+      bountyLevel: 1,
+      bountyTarget: 58,
+      bountyRewardItemCount: 1,
+      color: "#6f9bf0",
+      radius: 13,
+      hp: 30,
+      shieldHp: 24,
+      damage: 11,
+      resistances: ["piercing"],
+      weaknesses: ["bludgeoning"],
+      speed: 76,
+      xpDrop: 11,
+      goldChance: 0.2,
+      goldDrop: 1
+    },
     dasher: {
       id: "dasher",
       label: "Lancer",
@@ -130,6 +172,30 @@
     green: { id: "green", label: "Green", color: "#76d68c", rank: 5 }
   };
 
+  const WEAPON_MASTERY = {
+    tiersByRarity: {
+      grey: 1,
+      blue: 2,
+      purple: 3,
+      gold: 4,
+      green: 5
+    },
+    perTierFlatBonusByRarity: {
+      grey: 1,
+      blue: 1,
+      purple: 2,
+      gold: 2,
+      green: 3
+    },
+    thresholdsByRarity: {
+      grey: [100],
+      blue: [120, 350],
+      purple: [220, 520, 900],
+      gold: [300, 700, 1200, 1800],
+      green: [420, 920, 1600, 2350, 3200]
+    }
+  };
+
   const ITEM_TYPES = {
     melee_weapon: { id: "melee_weapon", label: "Melee Weapon" },
     ranged_weapon: { id: "ranged_weapon", label: "Ranged Weapon" },
@@ -170,11 +236,72 @@
       index: 1,
       label: "Level 1",
       subtitle: "Barbarian Last Stand"
+    },
+    {
+      id: "level_2",
+      index: 2,
+      label: "Level 2",
+      subtitle: "Bloodwind Approach",
+      spawnWeightAdditions: [
+        { trishot: 0.04 },
+        { trishot: 0.08 },
+        { trishot: 0.12 },
+        { trishot: 0.16 },
+        { trishot: 0.2 }
+      ]
     }
   ];
 
+  const GAME_LEVEL_SCALING = {
+    defaultProfile: {
+      enemyHealthMultiplier: 1,
+      enemyDamageMultiplier: 1,
+      enemyXpMultiplier: 1,
+      enemySpawnRateMultiplier: 1,
+      itemDamageMultiplier: 1
+    },
+    perLevelGrowth: {
+      enemyHealthMultiplier: 0.2,
+      enemyDamageMultiplier: 0.12,
+      enemyXpMultiplier: 0.17,
+      enemySpawnRateMultiplier: 0.08,
+      itemDamageMultiplier: 0.22
+    },
+    byLevel: {
+      1: {
+        enemyHealthMultiplier: 1,
+        enemyDamageMultiplier: 1,
+        enemyXpMultiplier: 1,
+        enemySpawnRateMultiplier: 1,
+        itemDamageMultiplier: 1
+      },
+      2: {
+        enemyHealthMultiplier: 1.45,
+        enemyDamageMultiplier: 1.3,
+        enemyXpMultiplier: 1.42,
+        enemySpawnRateMultiplier: 1.34,
+        itemDamageMultiplier: 1.22
+      }
+    },
+    itemDamageStatKeys: ["slashingDamageBonus", "piercingDamageBonus", "bludgeoningDamageBonus"]
+  };
+
+  const DIFFICULTY_MODIFIER = {
+    defaultDifficulty: 1,
+    maxDifficulty: 10,
+    enemyHealthPerDifficulty: 0.18,
+    enemyDamagePerDifficulty: 0.13,
+    enemySpeedPerDifficulty: 0.04,
+    enemyXpPerDifficulty: 0.2
+  };
+
   const BOUNTIES = {
     defaultTarget: 50,
+    defaultXpReward: 30,
+    maxSteps: 5,
+    killMultipliersByStep: [1, 1.55, 2.2, 3.05, 4.1],
+    xpMultipliersByStep: [1, 1.35, 1.75, 2.2, 2.75],
+    damageBonusPctPerStep: 0.03,
     targetByBehavior: {
       chaser: 60,
       fast: 70,
@@ -189,9 +316,14 @@
       finalBoss: 2
     },
     levelRewardRarity: {
-      1: "blue",
-      2: "purple",
-      3: "gold"
+      1: "purple",
+      2: "gold",
+      3: "green"
+    },
+    levelRewardXp: {
+      1: 30,
+      2: 50,
+      3: 70
     }
   };
 
@@ -710,8 +842,8 @@
       weaponSlotWeight: 1,
       itemLevel: 1,
       classIds: ["barbarian"],
-      merchantLevelMin: 2,
-      merchantLevelMax: 3,
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
       stats: {
         slashingDamageBonus: 6
       }
@@ -728,8 +860,8 @@
       weaponSlotWeight: 1,
       itemLevel: 1,
       classIds: ["barbarian"],
-      merchantLevelMin: 2,
-      merchantLevelMax: 3,
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
       stats: {
         piercingDamageBonus: 6
       }
@@ -743,8 +875,8 @@
       allowedSlot: "chest",
       itemLevel: 1,
       classIds: ["barbarian"],
-      merchantLevelMin: 2,
-      merchantLevelMax: 3,
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
       stats: {
         armor: 8
       }
@@ -758,8 +890,8 @@
       allowedSlot: "helmet",
       itemLevel: 1,
       classIds: ["barbarian"],
-      merchantLevelMin: 2,
-      merchantLevelMax: 3,
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
       stats: {
         armor: 5,
         maxHpBonus: 13
@@ -774,8 +906,8 @@
       allowedSlot: "leggings",
       itemLevel: 1,
       classIds: ["barbarian"],
-      merchantLevelMin: 2,
-      merchantLevelMax: 3,
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
       stats: {
         armor: 7,
         maxHpBonus: 18
@@ -790,8 +922,8 @@
       allowedSlot: "boots",
       itemLevel: 1,
       classIds: ["barbarian"],
-      merchantLevelMin: 2,
-      merchantLevelMax: 3,
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
       stats: {
         moveSpeedBonusPct: 10,
         statusEffectResistPct: 20
@@ -806,8 +938,8 @@
       allowedSlots: ["ring1", "ring2"],
       itemLevel: 1,
       classIds: ["barbarian"],
-      merchantLevelMin: 2,
-      merchantLevelMax: 3,
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
       stats: {
         slashingDamageBonus: 3,
         piercingDamageBonus: 3
@@ -822,11 +954,219 @@
       allowedSlot: "amulet",
       itemLevel: 1,
       classIds: ["barbarian"],
-      merchantLevelMin: 2,
-      merchantLevelMax: 3,
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
       stats: {
         maxHpBonus: 14,
         statusEffectResistPct: 12
+      }
+    },
+    gold_axe: {
+      id: "gold_axe",
+      name: "Axe",
+      rarity: "gold",
+      itemType: "melee_weapon",
+      itemCategory: "weapon",
+      weaponCategory: "melee",
+      physicalDamageType: "slashing",
+      allowedSlots: ["primaryMeleeWeapon", "secondaryMeleeWeapon"],
+      weaponSlotWeight: 1,
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
+      stats: {
+        slashingDamageBonus: 9
+      }
+    },
+    gold_javelin: {
+      id: "gold_javelin",
+      name: "Javelin",
+      rarity: "gold",
+      itemType: "ranged_weapon",
+      itemCategory: "weapon",
+      weaponCategory: "ranged",
+      physicalDamageType: "piercing",
+      allowedSlot: "rangedWeapon",
+      weaponSlotWeight: 1,
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
+      stats: {
+        piercingDamageBonus: 9
+      }
+    },
+    gold_chest_piece: {
+      id: "gold_chest_piece",
+      name: "Chest Piece",
+      rarity: "gold",
+      itemType: "chest",
+      itemCategory: "armor",
+      allowedSlot: "chest",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
+      stats: {
+        armor: 12,
+        maxHpBonus: 24
+      }
+    },
+    gold_helmet: {
+      id: "gold_helmet",
+      name: "Helm",
+      rarity: "gold",
+      itemType: "helmet",
+      itemCategory: "armor",
+      allowedSlot: "helmet",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
+      stats: {
+        armor: 8,
+        maxHpBonus: 18
+      }
+    },
+    gold_leggings: {
+      id: "gold_leggings",
+      name: "Leggings",
+      rarity: "gold",
+      itemType: "leggings",
+      itemCategory: "armor",
+      allowedSlot: "leggings",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
+      stats: {
+        armor: 10,
+        maxHpBonus: 24
+      }
+    },
+    gold_boots: {
+      id: "gold_boots",
+      name: "Boots",
+      rarity: "gold",
+      itemType: "boots",
+      itemCategory: "armor",
+      allowedSlot: "boots",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
+      stats: {
+        moveSpeedBonusPct: 13,
+        statusEffectResistPct: 26
+      }
+    },
+    gold_ring: {
+      id: "gold_ring",
+      name: "Ring",
+      rarity: "gold",
+      itemType: "ring",
+      itemCategory: "accessory",
+      allowedSlots: ["ring1", "ring2"],
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
+      stats: {
+        slashingDamageBonus: 5,
+        piercingDamageBonus: 5
+      }
+    },
+    gold_amulet: {
+      id: "gold_amulet",
+      name: "Amulet",
+      rarity: "gold",
+      itemType: "amulet",
+      itemCategory: "accessory",
+      allowedSlot: "amulet",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
+      stats: {
+        maxHpBonus: 22,
+        statusEffectResistPct: 18
+      }
+    },
+    green_berserker_helmet: {
+      id: "green_berserker_helmet",
+      name: "Berserker Helm",
+      rarity: "green",
+      itemType: "helmet",
+      itemCategory: "armor",
+      setId: "berserker_set",
+      setName: "Berserker Set",
+      setPiece: "helmet",
+      allowedSlot: "helmet",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 999,
+      merchantLevelMax: 999,
+      stats: {
+        armor: 10,
+        maxHpBonus: 24
+      }
+    },
+    green_berserker_chest: {
+      id: "green_berserker_chest",
+      name: "Berserker Chestguard",
+      rarity: "green",
+      itemType: "chest",
+      itemCategory: "armor",
+      setId: "berserker_set",
+      setName: "Berserker Set",
+      setPiece: "chest",
+      allowedSlot: "chest",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 999,
+      merchantLevelMax: 999,
+      stats: {
+        armor: 14,
+        maxHpBonus: 32
+      }
+    },
+    green_berserker_leggings: {
+      id: "green_berserker_leggings",
+      name: "Berserker Legguards",
+      rarity: "green",
+      itemType: "leggings",
+      itemCategory: "armor",
+      setId: "berserker_set",
+      setName: "Berserker Set",
+      setPiece: "leggings",
+      allowedSlot: "leggings",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 999,
+      merchantLevelMax: 999,
+      stats: {
+        armor: 12,
+        maxHpBonus: 28
+      }
+    },
+    green_berserker_boots: {
+      id: "green_berserker_boots",
+      name: "Berserker Boots",
+      rarity: "green",
+      itemType: "boots",
+      itemCategory: "armor",
+      setId: "berserker_set",
+      setName: "Berserker Set",
+      setPiece: "boots",
+      allowedSlot: "boots",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 999,
+      merchantLevelMax: 999,
+      stats: {
+        moveSpeedBonusPct: 16,
+        statusEffectResistPct: 30
       }
     }
   };
@@ -836,17 +1176,102 @@
   };
 
   const MERCHANT = {
-    refreshRuns: 5,
+    refreshRuns: 1,
+    refreshMinRunSeconds: 120,
     defaultInventorySize: 6,
     defaultProgressionLevel: 1,
+    manualRefresh: {
+      baseCost: 50,
+      costPerUnlockedLevel: 20
+    },
+    progression: {
+      xpPerGoldSpent: 1.35,
+      baseXpToLevel: 180,
+      growth: 1.32,
+      levelsPerGameLevel: 5,
+      maxLevel: 30,
+      maxPurpleListingsAtLevel5: 1,
+      blueStatScaling: {
+        startLevel: 2,
+        perLevel: 0.08,
+        maxMultiplier: 1.35
+      },
+      reviveConsumable: {
+        id: "revive_sigil",
+        name: "Phoenix Sigil",
+        rarity: "blue",
+        description: "Consumed on death to revive and continue the run.",
+        price: 220,
+        unlockAtMaxLevelOnly: true,
+        maxOwned: 1,
+        reviveHpPct: 0.45,
+        postReviveInvulnSeconds: 2.4
+      },
+      healthPotion: {
+        id: "health_potion",
+        name: "Health Potion",
+        rarity: "blue",
+        description: "Use during a run (Q) to restore 50% of max HP.",
+        price: 50,
+        unlockAtMerchantLevel: 1,
+        maxOwned: 3,
+        healHpPct: 0.5
+      }
+    },
     levelPools: {
       1: {
         id: "level_1_merchant",
         label: "Level 1 Merchant",
         allowedRarities: ["grey", "blue"],
         rarityWeights: {
-          grey: 0.78,
-          blue: 0.22
+          grey: 0.7,
+          blue: 0.3
+        },
+        minItemLevel: 1,
+        maxItemLevel: 1
+      },
+      2: {
+        id: "level_2_merchant",
+        label: "Level 2 Merchant",
+        allowedRarities: ["grey", "blue"],
+        rarityWeights: {
+          grey: 0.55,
+          blue: 0.45
+        },
+        minItemLevel: 1,
+        maxItemLevel: 1
+      },
+      3: {
+        id: "level_3_merchant",
+        label: "Level 3 Merchant",
+        allowedRarities: ["grey", "blue", "purple"],
+        rarityWeights: {
+          grey: 0.35,
+          blue: 0.45,
+          purple: 0.2
+        },
+        minItemLevel: 1,
+        maxItemLevel: 1
+      },
+      4: {
+        id: "level_4_merchant",
+        label: "Level 4 Merchant",
+        allowedRarities: ["blue", "purple"],
+        rarityWeights: {
+          blue: 0.6,
+          purple: 0.4
+        },
+        minItemLevel: 1,
+        maxItemLevel: 1
+      },
+      5: {
+        id: "level_5_merchant",
+        label: "Level 5 Merchant",
+        allowedRarities: ["blue", "purple", "gold"],
+        rarityWeights: {
+          blue: 0.52,
+          purple: 0.4,
+          gold: 0.08
         },
         minItemLevel: 1,
         maxItemLevel: 1
@@ -896,33 +1321,40 @@
       miniboss: {
         enabled: true,
         minDrops: 1,
-        extraDropChances: [0.22],
+        extraDropChances: [],
         rarityWeightsByLevel: {
           1: {
-            grey: 0.74,
-            blue: 0.26
+            purple: 0.9,
+            gold: 0.1
           }
         },
         allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "boots", "ring", "amulet"],
         maxRarityByLevel: {
-          1: "blue"
+          1: "gold"
         }
       },
       finalBoss: {
         enabled: true,
-        minDrops: 1,
-        extraDropChances: [0.52, 0.18],
+        minDrops: 3,
+        extraDropChances: [],
         rarityWeightsByLevel: {
           1: {
-            grey: 0.27,
-            blue: 0.56,
-            purple: 0.17
+            gold: 0.9,
+            green: 0.1
           }
         },
         allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "boots", "ring", "amulet"],
         maxRarityByLevel: {
-          1: "purple"
+          1: "green"
         }
+      }
+    },
+    weaponScaling: {
+      baseDamagePerGameLevel: 5,
+      bonusRangesByLevel: {
+        1: { min: 2, max: 4 },
+        2: { min: 5, max: 8 },
+        3: { min: 8, max: 12 }
       }
     },
     visuals: {
@@ -933,6 +1365,12 @@
         purple: "#b584ff",
         gold: "#f2c35f",
         green: "#76d68c"
+      },
+      bossDropGlow: {
+        enabled: true,
+        minBlur: 10,
+        maxBlur: 18,
+        pulseSpeed: 5.5
       }
     }
   };
@@ -1109,6 +1547,7 @@
       grunt: { mass: 1, collisionScale: 0.92 },
       runner: { mass: 0.85, collisionScale: 0.86 },
       shooter: { mass: 0.95, collisionScale: 0.9 },
+      shieldbearer: { mass: 1.1, collisionScale: 0.94 },
       dasher: { mass: 0.9, collisionScale: 0.88 },
       miniboss: { mass: 4.5, collisionScale: 1.05 },
       finalBoss: { mass: 9, collisionScale: 1.12 }
@@ -1170,10 +1609,95 @@
     }
   };
 
+  const TERRAIN_TYPES = [
+    {
+      id: "rock_cluster",
+      label: "Rock Cluster",
+      category: "small",
+      spritePath: "assets/terrain/rock-cluster.svg",
+      minWidth: 28,
+      maxWidth: 38,
+      minHeight: 24,
+      maxHeight: 34
+    },
+    {
+      id: "tree_stump",
+      label: "Tree Stump",
+      category: "small",
+      spritePath: "assets/terrain/tree-stump.svg",
+      minWidth: 24,
+      maxWidth: 34,
+      minHeight: 26,
+      maxHeight: 36
+    },
+    {
+      id: "crate_stack",
+      label: "Crate Stack",
+      category: "small",
+      spritePath: "assets/terrain/crate-stack.svg",
+      minWidth: 28,
+      maxWidth: 40,
+      minHeight: 28,
+      maxHeight: 40
+    },
+    {
+      id: "broken_pillar",
+      label: "Broken Pillar",
+      category: "medium",
+      spritePath: "assets/terrain/broken-pillar.svg",
+      minWidth: 30,
+      maxWidth: 42,
+      minHeight: 42,
+      maxHeight: 62
+    },
+    {
+      id: "bone_pile",
+      label: "Bone Pile",
+      category: "small",
+      spritePath: "assets/terrain/bone-pile.svg",
+      minWidth: 30,
+      maxWidth: 42,
+      minHeight: 22,
+      maxHeight: 30
+    },
+    {
+      id: "ruins_debris",
+      label: "Ruins Debris",
+      category: "medium",
+      spritePath: "assets/terrain/ruins-debris.svg",
+      minWidth: 34,
+      maxWidth: 52,
+      minHeight: 28,
+      maxHeight: 42
+    }
+  ];
+
   const OBSTACLES = {
     enabled: true,
-    minCount: 6,
-    maxCount: 9,
+    useSprites: false,
+    startWithTerrain: false,
+    movementSpawnOnly: true,
+    minCount: 8,
+    maxCount: 14,
+    densityByArena: {
+      small: { minCount: 3, maxCount: 6 },
+      medium: { minCount: 5, maxCount: 10 },
+      large: { minCount: 8, maxCount: 14 }
+    },
+    arenaAreaThresholds: {
+      smallMax: 420000,
+      mediumMax: 820000
+    },
+    guaranteedInViewMin: 4,
+    guaranteedInViewMax: 6,
+    minVisibleOnScreen: 3,
+    movementSpawnIntervalSeconds: 0.18,
+    maxDirectionalSpawnPerTick: 2,
+    spawnOffscreenBuffer: 24,
+    spawnOffscreenBufferJitter: 18,
+    maxObstacleCount: 160,
+    pruneOffscreenMargin: 260,
+    directionalSpawnChance: 0.35,
     minWidth: 26,
     maxWidth: 38,
     minHeight: 44,
@@ -1186,7 +1710,11 @@
     spawnAreaHeightMultiplier: 3.2,
     playerCollisionPadding: 2,
     enemyCollisionPadding: 1,
-    fillColor: "rgba(78, 88, 112, 0.85)",
+    debug: {
+      showColliderOutlines: false,
+      terrainEnabled: true
+    },
+    fillColor: "#4f6486",
     strokeColor: "rgba(188, 201, 229, 0.36)"
   };
 
@@ -1433,6 +1961,98 @@
     }
   };
 
+  const CLASS_SKILLS = {
+    barbarian: {
+      classId: "barbarian",
+      title: "Warrior Skills",
+      subtitle: "Class-specific combat skills for Barbarian characters.",
+      unlockProgressionLabel: "Unlocks from character Level",
+      skills: [
+        {
+          id: "sever_artery",
+          name: "Sever Artery",
+          type: "passive",
+          category: "Damage Over Time",
+          classIds: ["barbarian"],
+          unlockLegacyLevel: 1,
+          description: "Melee hits apply Bleed stacks that tick once per second.",
+          baseValues: {
+            maxStacks: 3,
+            damagePerStack: 5,
+            tickSeconds: 1,
+            durationSeconds: 4
+          },
+          scalingValues: {
+            maxStacksPerRank: 2,
+            damagePerStackPerRank: 2
+          },
+          currentLevel: 1
+        },
+        {
+          id: "blood_frenzy",
+          name: "Blood Frenzy",
+          type: "passive_triggered",
+          category: "Attack Speed Buff",
+          classIds: ["barbarian"],
+          unlockLegacyLevel: 1,
+          description: "Enemy kills grant a temporary attack speed buff.",
+          baseValues: {
+            attackSpeedBonusPct: 0.1,
+            durationSeconds: 2
+          },
+          scalingValues: {
+            attackSpeedBonusPctPerRank: 0.05,
+            durationSecondsPerRank: 1
+          },
+          currentLevel: 1
+        },
+        {
+          id: "ground_slam",
+          name: "Ground Slam",
+          type: "active",
+          category: "AoE + Crowd Control",
+          classIds: ["barbarian"],
+          unlockLegacyLevel: 3,
+          description: "Slam in a forward cone, damaging and stunning enemies.",
+          keybind: "E",
+          baseValues: {
+            coneDegrees: 45,
+            rangeMultiplier: 1.2,
+            damageMultiplier: 0.85,
+            stunSeconds: 0.5,
+            cooldownSeconds: 10
+          },
+          scalingValues: {
+            coneDegreesPerRank: 15,
+            stunSecondsPerRank: 0.25
+          },
+          currentLevel: 1
+        },
+        {
+          id: "war_cry",
+          name: "War Cry",
+          type: "active",
+          category: "AoE Debuff",
+          classIds: ["barbarian"],
+          unlockLegacyLevel: 5,
+          description: "Shout in an area and reduce enemy movement speed.",
+          keybind: "R",
+          baseValues: {
+            radius: 132,
+            slowPct: 0.2,
+            durationSeconds: 2,
+            cooldownSeconds: 14
+          },
+          scalingValues: {
+            radiusPerRank: 18,
+            slowPctPerRank: 0.1
+          },
+          currentLevel: 1
+        }
+      ]
+    }
+  };
+
   window.RL_DATA = Object.freeze({
     GAME_TITLE: "Barbarian Last Stand",
     STORAGE: {
@@ -1454,7 +2074,10 @@
       }
     },
     LEVELS,
+    GAME_LEVEL_SCALING,
+    DIFFICULTY_MODIFIER,
     ITEM_RARITIES,
+    WEAPON_MASTERY,
     ITEM_TYPES,
     PHYSICAL_DAMAGE_TYPES,
     ELEMENTAL_DAMAGE_TYPES,
@@ -1474,7 +2097,7 @@
         label: "Axe",
         baseDamage: 22,
         cooldown: 1.05,
-        range: 80,
+        range: 96,
         arcRadians: 1.18,
         swingDuration: 0.15
       },
@@ -1501,19 +2124,22 @@
       pickupRadius: 30
     },
     RUN: {
-      finalBossTimeSeconds: 1200,
+      finalBossTimeSeconds: 600,
       minibossIntervalSeconds: 300,
       baseSpawnRatePerSecond: 1.05,
       baseSpawnPackMin: 1,
       baseSpawnPackMax: 2,
+      maxSkillChoicesPerRun: 4,
       healthScalingPerMinute: 0.085,
       damageScalingPerMinute: 0.055,
+      inRunXpGainMultiplier: 1.45,
       xpScalingPerMinute: 0.07,
       goldPickupMultiplier: 0.5,
       goldRewardPerSecond: 0.04,
       legacyPerMinute: 6
     },
     SWARM_EVENTS,
+    TERRAIN_TYPES,
     OBSTACLES,
     ENEMY_COLLISION,
     LEGACY_PROGRESSION: {
@@ -1527,71 +2153,76 @@
     SPAWN_TABLES: [
       {
         start: 0,
-        end: 300,
+        end: 150,
         spawnRateMultiplier: 1,
         packMin: 1,
         packMax: 2,
         burstChance: 0.08,
         weights: {
-          grunt: 0.72,
-          runner: 0.25,
+          grunt: 0.66,
+          runner: 0.24,
           shooter: 0.03,
+          shieldbearer: 0.07,
           dasher: 0
         }
       },
       {
-        start: 300,
-        end: 600,
+        start: 150,
+        end: 300,
         spawnRateMultiplier: 1.22,
         packMin: 2,
         packMax: 3,
         burstChance: 0.12,
         weights: {
-          grunt: 0.56,
-          runner: 0.25,
+          grunt: 0.5,
+          runner: 0.24,
           shooter: 0.1,
+          shieldbearer: 0.08,
           dasher: 0.14
         }
       },
       {
-        start: 600,
-        end: 900,
+        start: 300,
+        end: 450,
         spawnRateMultiplier: 1.45,
         packMin: 2,
         packMax: 4,
         burstChance: 0.15,
         weights: {
-          grunt: 0.42,
-          runner: 0.25,
+          grunt: 0.37,
+          runner: 0.23,
           shooter: 0.14,
+          shieldbearer: 0.07,
           dasher: 0.19
         }
       },
       {
-        start: 900,
-        end: 1200,
-        spawnRateMultiplier: 1.7,
+        start: 450,
+        end: 600,
+        spawnRateMultiplier: 1.62,
         packMin: 3,
         packMax: 5,
         burstChance: 0.2,
         weights: {
-          grunt: 0.36,
-          runner: 0.22,
+          grunt: 0.32,
+          runner: 0.2,
           shooter: 0.18,
+          shieldbearer: 0.06,
           dasher: 0.24
         }
       },
       {
-        start: 1200,
+        start: 600,
         end: 99999,
-        spawnRateMultiplier: 1.86,
+        spawnRateMultiplier: 1.78,
         packMin: 3,
         packMax: 6,
         burstChance: 0.24,
         weights: {
-          grunt: 0.32,
-          runner: 0.2,
+          grunt: 0.28,
+          runner: 0.18,
           shooter: 0.2,
+          shieldbearer: 0.06,
           dasher: 0.28
         }
       }
@@ -1599,6 +2230,7 @@
     ENEMIES: ENEMY_TYPES,
     UPGRADES: UPGRADE_DEFINITIONS,
     TOTAL_UPGRADE_CAPACITY,
-    SKILL_TREES: SKILL_TREE_DEFINITIONS
+    SKILL_TREES: SKILL_TREE_DEFINITIONS,
+    CLASS_SKILLS
   });
 })();
