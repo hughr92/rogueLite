@@ -100,6 +100,11 @@
   const POST_CAP_REWARD_HEALTH_ID = "post_cap_health_50pct";
   const POST_CAP_REWARD_GOLD_ID = "post_cap_gold_50";
   const MAX_SKILL_CHOICES_PER_RUN = Math.max(1, Math.floor(Number((DATA.RUN && DATA.RUN.maxSkillChoicesPerRun) || 4)));
+  const FIXED_WORLD_TILE_SIZE = 48;
+  const FIXED_WORLD_TILES_WIDE = 20;
+  const FIXED_WORLD_TILES_TALL = 20;
+  const FIXED_WORLD_WIDTH = FIXED_WORLD_TILE_SIZE * FIXED_WORLD_TILES_WIDE;
+  const FIXED_WORLD_HEIGHT = FIXED_WORLD_TILE_SIZE * FIXED_WORLD_TILES_TALL;
 
   class GameApp {
     constructor() {
@@ -124,6 +129,18 @@
       this.obstacleSprites = this.createObstacleSprites(this.terrainTypes);
       this.chestSprites = this.createChestSprites();
       this.characterSprites = this.createCharacterSprites();
+      this.enemySprites = this.createEnemySprites();
+      this.renderViewport = {
+        screenWidth: 1,
+        screenHeight: 1,
+        worldWidth: FIXED_WORLD_WIDTH,
+        worldHeight: FIXED_WORLD_HEIGHT,
+        scale: 1,
+        offsetX: 0,
+        offsetY: 0,
+        viewportWidth: FIXED_WORLD_WIDTH,
+        viewportHeight: FIXED_WORLD_HEIGHT
+      };
 
       this.boundLoop = this.loop.bind(this);
       this.boundResize = this.handleResize.bind(this);
@@ -153,61 +170,214 @@
       });
     }
 
+    createEnemySprites() {
+      if (typeof Image === "undefined") return {};
+      const byTypeId = {
+        grunt: "images/enemies/melee_basic/1_raider/base/skeleton_melee.png"
+      };
+      const sprites = {};
+      Object.keys(byTypeId).forEach((typeId) => {
+        const image = new Image();
+        image.src = byTypeId[typeId];
+        sprites[typeId] = image;
+      });
+      return sprites;
+    }
+
+    getEnemySprite(typeId) {
+      if (!this.enemySprites || typeof this.enemySprites !== "object") return null;
+      const key = String(typeId || "").trim();
+      const image = key ? this.enemySprites[key] : null;
+      if (!image || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      return image;
+    }
+
     createCharacterSprites() {
       if (typeof Image === "undefined") return {};
-      const idleFramePaths = [
-        "art/characters/barbarian/animations/idle/barbarian_idle_frame_1.png",
-        "art/characters/barbarian/animations/idle/barbarian_idle_frame_2.png",
-        "art/characters/barbarian/animations/idle/barbarian_idle_frame_3.png",
-        "art/characters/barbarian/animations/idle/barbarian_idle_frame_4.png"
-      ];
-      const idleFrames = idleFramePaths.map((path) => {
-        const image = new Image();
-        image.src = path;
-        return image;
-      });
+      const staticImage = new Image();
+      staticImage.src = "art/characters/barbarian/barbarian_static_2.png";
       return {
         barbarian: {
-          idle: {
-            frames: idleFrames,
-            sequence: [0, 1, 0, 2, 0, 3],
-            frameDurationSeconds: 0.22,
+          static: {
+            image: staticImage,
             renderHeight: 66
           }
         }
       };
     }
 
-    getBarbarianIdleFrame(run) {
-      const spriteSet = this.characterSprites && this.characterSprites.barbarian && this.characterSprites.barbarian.idle;
-      if (!spriteSet) return null;
-      const frames = Array.isArray(spriteSet.frames) ? spriteSet.frames : [];
-      const sequence = Array.isArray(spriteSet.sequence) && spriteSet.sequence.length ? spriteSet.sequence : [0];
-      if (!frames.length) return null;
-      const frameDuration = Math.max(0.08, Number(spriteSet.frameDurationSeconds || 0.22));
-      const frameStep = Math.floor(Math.max(0, Number((run && run.time) || 0)) / frameDuration);
-      const sequenceIndex = sequence[frameStep % sequence.length];
-      const frame = frames[Math.max(0, Math.min(frames.length - 1, Number(sequenceIndex || 0)))];
-      if (!frame || !frame.complete || frame.naturalWidth <= 0 || frame.naturalHeight <= 0) return null;
+    getDefaultBarbarianWalkManifest() {
       return {
+        animationName: "barbarian_walk_side",
+        sourceImage: "barbarian_walk_side_sheet_corrected.png",
+        frameWidth: 336,
+        frameHeight: 400,
+        frameCount: 4,
+        loop: true,
+        spacing: 0,
+        margin: 0,
+        frames: [
+          { index: 0, x: 0, y: 0, w: 336, h: 400, duration: 100 },
+          { index: 1, x: 336, y: 0, w: 336, h: 400, duration: 100 },
+          { index: 2, x: 672, y: 0, w: 336, h: 400, duration: 100 },
+          { index: 3, x: 1008, y: 0, w: 336, h: 400, duration: 100 }
+        ]
+      };
+    }
+
+    resolveManifestAssetPath(manifestPath, sourceImagePath) {
+      const source = String(sourceImagePath || "").trim();
+      if (!source) return "";
+      if (/^(https?:)?\/\//i.test(source) || source.startsWith("/")) return source;
+      const lastSlash = manifestPath.lastIndexOf("/");
+      if (lastSlash < 0) return source;
+      return `${manifestPath.slice(0, lastSlash + 1)}${source}`;
+    }
+
+    normalizeSpriteManifest(rawManifest, manifestPath) {
+      const manifest = rawManifest && typeof rawManifest === "object" ? rawManifest : {};
+      const frameWidth = Math.max(1, Math.floor(Number(manifest.frameWidth || 1)));
+      const frameHeight = Math.max(1, Math.floor(Number(manifest.frameHeight || 1)));
+      const frameCount = Math.max(1, Math.floor(Number(manifest.frameCount || 1)));
+      const rawFrames = Array.isArray(manifest.frames) ? manifest.frames : [];
+      const frames = rawFrames
+        .map((frame, index) => {
+          const safeFrame = frame && typeof frame === "object" ? frame : {};
+          const frameIndex = Math.max(0, Math.floor(Number(safeFrame.index || index)));
+          return {
+            index: frameIndex,
+            x: Math.max(0, Math.floor(Number(safeFrame.x || 0))),
+            y: Math.max(0, Math.floor(Number(safeFrame.y || 0))),
+            w: Math.max(1, Math.floor(Number(safeFrame.w || frameWidth))),
+            h: Math.max(1, Math.floor(Number(safeFrame.h || frameHeight))),
+            durationMs: Math.max(30, Math.floor(Number(safeFrame.duration || 100)))
+          };
+        })
+        .sort((a, b) => a.index - b.index)
+        .slice(0, frameCount);
+      if (!frames.length) return null;
+      return {
+        animationName: String(manifest.animationName || "barbarian_walk_side").trim() || "barbarian_walk_side",
+        loop: manifest.loop !== false,
+        sourceImagePath: this.resolveManifestAssetPath(manifestPath, manifest.sourceImage),
+        frames
+      };
+    }
+
+    registerBarbarianWalkAnimation(barbarianSet, manifest, manifestPath) {
+      const normalized = this.normalizeSpriteManifest(manifest, manifestPath);
+      if (!normalized || !normalized.sourceImagePath) return;
+      const sheetImage = new Image();
+      sheetImage.src = normalized.sourceImagePath;
+      barbarianSet.walk = {
+        animationName: normalized.animationName,
+        loop: normalized.loop,
+        sheetImage,
+        frames: normalized.frames,
+        renderHeight: Math.max(
+          40,
+          Number(barbarianSet && barbarianSet.idle && barbarianSet.idle.renderHeight) || 66
+        )
+      };
+    }
+
+    loadBarbarianWalkSpriteManifest(barbarianSet) {
+      if (!barbarianSet) return;
+      const manifestPath = "art/characters/barbarian/animations/walk/barbarian_walk_side_sheet.json";
+      const fallbackManifest = this.getDefaultBarbarianWalkManifest();
+
+      if (typeof fetch !== "function") {
+        this.registerBarbarianWalkAnimation(barbarianSet, fallbackManifest, manifestPath);
+        return;
+      }
+
+      fetch(manifestPath)
+        .then((response) => {
+          if (!response || !response.ok) {
+            throw new Error("Failed to load walk manifest.");
+          }
+          return response.json();
+        })
+        .then((manifest) => {
+          this.registerBarbarianWalkAnimation(barbarianSet, manifest, manifestPath);
+        })
+        .catch(() => {
+          this.registerBarbarianWalkAnimation(barbarianSet, fallbackManifest, manifestPath);
+        });
+    }
+
+    getTimedFrameFromSequence(frames, sequenceOrder, timeSeconds) {
+      if (!Array.isArray(frames) || !frames.length) return null;
+      const safeSequence = Array.isArray(sequenceOrder) && sequenceOrder.length ? sequenceOrder : frames.map((_, index) => index);
+      const sequenceFrames = safeSequence
+        .map((sequenceIndex) => frames[Math.max(0, Math.min(frames.length - 1, Math.floor(Number(sequenceIndex || 0))))])
+        .filter(Boolean);
+      if (!sequenceFrames.length) return null;
+
+      const totalDurationMs = sequenceFrames.reduce((sum, frame) => sum + Math.max(30, Number(frame.durationMs || 100)), 0);
+      if (totalDurationMs <= 0) return sequenceFrames[0];
+      let cursorMs = ((Math.max(0, Number(timeSeconds || 0)) * 1000) % totalDurationMs + totalDurationMs) % totalDurationMs;
+      for (let i = 0; i < sequenceFrames.length; i += 1) {
+        const durationMs = Math.max(30, Number(sequenceFrames[i].durationMs || 100));
+        if (cursorMs < durationMs) return sequenceFrames[i];
+        cursorMs -= durationMs;
+      }
+      return sequenceFrames[sequenceFrames.length - 1];
+    }
+
+    getBarbarianStaticFrame() {
+      const spriteSet = this.characterSprites && this.characterSprites.barbarian && this.characterSprites.barbarian.static;
+      if (!spriteSet || !spriteSet.image) return null;
+      const frame = spriteSet.image;
+      if (!frame.complete || frame.naturalWidth <= 0 || frame.naturalHeight <= 0) return null;
+      return {
+        animationId: "static",
         image: frame,
         renderHeight: Math.max(40, Number(spriteSet.renderHeight || 94))
       };
     }
 
     drawBarbarianPlayerSprite(run, player) {
-      const frame = this.getBarbarianIdleFrame(run);
+      const frame = this.getBarbarianStaticFrame();
       if (!frame) return false;
 
       const ctx = this.ctx;
       const renderHeight = Math.max(player.radius * 2.2, frame.renderHeight);
-      const aspect = frame.image.naturalWidth / frame.image.naturalHeight;
+      const sourceW = Number(frame.sourceW || frame.image.naturalWidth || 1);
+      const sourceH = Number(frame.sourceH || frame.image.naturalHeight || 1);
+      const aspect = sourceW / sourceH;
       const renderWidth = renderHeight * aspect;
       const left = player.x - renderWidth * 0.5;
       const top = player.y + player.radius - renderHeight;
       const previousSmoothing = ctx.imageSmoothingEnabled;
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(frame.image, left, top, renderWidth, renderHeight);
+      const mirrorLeft = Number(player && player.spriteFacingX) < 0;
+      if (mirrorLeft) {
+        ctx.save();
+        ctx.translate(player.x, 0);
+        ctx.scale(-1, 1);
+      }
+
+      const drawLeft = mirrorLeft ? -renderWidth * 0.5 : left;
+      if (typeof frame.sourceX === "number") {
+        ctx.drawImage(
+          frame.image,
+          frame.sourceX,
+          frame.sourceY,
+          sourceW,
+          sourceH,
+          drawLeft,
+          top,
+          renderWidth,
+          renderHeight
+        );
+      } else {
+        ctx.drawImage(frame.image, drawLeft, top, renderWidth, renderHeight);
+      }
+
+      if (mirrorLeft) {
+        ctx.restore();
+      }
       ctx.imageSmoothingEnabled = previousSmoothing;
       return true;
     }
@@ -283,6 +453,10 @@
         if (event.code === "F8" && !event.repeat) {
           this.toggleTerrainColliderOutlineDebug();
         }
+
+        if (event.code === "F9" && !event.repeat) {
+          this.toggleFixedWorldGuidesDebug();
+        }
       });
 
       window.addEventListener("keyup", (event) => {
@@ -293,9 +467,59 @@
 
       this.canvas.addEventListener("mousemove", (event) => {
         const rect = this.canvas.getBoundingClientRect();
-        this.input.mouseX = event.clientX - rect.left;
-        this.input.mouseY = event.clientY - rect.top;
+        const screenX = event.clientX - rect.left;
+        const screenY = event.clientY - rect.top;
+        const run = this.currentRun;
+        const viewport = this.getRenderViewport(run);
+        const worldWidth = run && run.world ? run.world.width : FIXED_WORLD_WIDTH;
+        const worldHeight = run && run.world ? run.world.height : FIXED_WORLD_HEIGHT;
+        const worldX = (screenX - viewport.offsetX) / Math.max(0.0001, viewport.scale);
+        const worldY = (screenY - viewport.offsetY) / Math.max(0.0001, viewport.scale);
+        this.input.mouseX = clamp(worldX, 0, worldWidth);
+        this.input.mouseY = clamp(worldY, 0, worldHeight);
       });
+    }
+
+    updateRenderViewport(screenWidth, screenHeight) {
+      const run = this.currentRun;
+      const worldWidth = run && run.world ? Math.max(1, Number(run.world.width || FIXED_WORLD_WIDTH)) : FIXED_WORLD_WIDTH;
+      const worldHeight = run && run.world ? Math.max(1, Number(run.world.height || FIXED_WORLD_HEIGHT)) : FIXED_WORLD_HEIGHT;
+      const safeScreenWidth = Math.max(1, Math.floor(Number(screenWidth || 1)));
+      const safeScreenHeight = Math.max(1, Math.floor(Number(screenHeight || 1)));
+      const scale = Math.max(0.0001, Math.min(safeScreenWidth / worldWidth, safeScreenHeight / worldHeight));
+      const viewportWidth = worldWidth * scale;
+      const viewportHeight = worldHeight * scale;
+      const offsetX = (safeScreenWidth - viewportWidth) * 0.5;
+      const offsetY = (safeScreenHeight - viewportHeight) * 0.5;
+      this.renderViewport = {
+        screenWidth: safeScreenWidth,
+        screenHeight: safeScreenHeight,
+        worldWidth,
+        worldHeight,
+        scale,
+        offsetX,
+        offsetY,
+        viewportWidth,
+        viewportHeight
+      };
+    }
+
+    getRenderViewport(run) {
+      const viewport = this.renderViewport || null;
+      if (!viewport) {
+        return {
+          screenWidth: 1,
+          screenHeight: 1,
+          worldWidth: run && run.world ? run.world.width : FIXED_WORLD_WIDTH,
+          worldHeight: run && run.world ? run.world.height : FIXED_WORLD_HEIGHT,
+          scale: 1,
+          offsetX: 0,
+          offsetY: 0,
+          viewportWidth: run && run.world ? run.world.width : FIXED_WORLD_WIDTH,
+          viewportHeight: run && run.world ? run.world.height : FIXED_WORLD_HEIGHT
+        };
+      }
+      return viewport;
     }
 
     handleResize() {
@@ -306,12 +530,7 @@
       this.canvas.width = Math.floor(width * dpr);
       this.canvas.height = Math.floor(height * dpr);
       this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      if (this.currentRun) {
-        this.currentRun.world.width = width;
-        this.currentRun.world.height = height;
-        this.centerPlayerInWorld();
-      }
+      this.updateRenderViewport(width, height);
     }
 
     refreshCharacters(initialLoad) {
@@ -1887,6 +2106,9 @@
       if (typeof run.debug.showTerrainColliderOutlines !== "boolean") {
         run.debug.showTerrainColliderOutlines = config.debug.showColliderOutlines;
       }
+      if (typeof run.debug.showFixedWorldGuides !== "boolean") {
+        run.debug.showFixedWorldGuides = false;
+      }
     }
 
     toggleTerrainEnabledDebug() {
@@ -1901,6 +2123,13 @@
       if (!run || run.ended) return;
       this.ensureRunDebugState(run);
       run.debug.showTerrainColliderOutlines = !run.debug.showTerrainColliderOutlines;
+    }
+
+    toggleFixedWorldGuidesDebug() {
+      const run = this.currentRun;
+      if (!run || run.ended) return;
+      this.ensureRunDebugState(run);
+      run.debug.showFixedWorldGuides = !run.debug.showFixedWorldGuides;
     }
 
     getObstacleHalfExtents(obstacle) {
@@ -3059,8 +3288,8 @@
       const axeData = DATA.WEAPONS.axe;
       const javelinData = DATA.WEAPONS.javelin;
       const playerBase = DATA.PLAYER_BASE;
-      const width = Math.max(1, this.canvas.clientWidth);
-      const height = Math.max(1, this.canvas.clientHeight);
+      const width = FIXED_WORLD_WIDTH;
+      const height = FIXED_WORLD_HEIGHT;
       const level = this.resolveSelectedLevelForCharacter(character, selectedLevel && selectedLevel.id);
       const difficulty = this.resolveSelectedDifficultyForCharacter(character, level, selectedDifficulty);
 
@@ -3088,7 +3317,8 @@
         },
         debug: {
           terrainEnabled: this.getObstacleConfig().debug.terrainEnabled,
-          showTerrainColliderOutlines: this.getObstacleConfig().debug.showColliderOutlines
+          showTerrainColliderOutlines: this.getObstacleConfig().debug.showColliderOutlines,
+          showFixedWorldGuides: false
         },
         time: 0,
         postRunRewards: {
@@ -3115,6 +3345,10 @@
           speedBoostTimer: 0,
           basePickupRadius: playerBase.pickupRadius,
           pickupRadius: playerBase.pickupRadius,
+          animationMoveX: 0,
+          animationMoveY: 0,
+          animationSpeed: 0,
+          spriteFacingX: 1,
           facing: 0,
           rage: {
             value: 0,
@@ -3349,7 +3583,7 @@
       const effects = run.attributeEffects || this.calculateAttributeEffects(run.attributes);
       const speedBoostMultiplier = player.speedBoostTimer > 0 ? effects.damageTakenSpeedBoostPct : 0;
       const rageMoveBonus = player.rage && player.rage.active && effects.rageAttackModifierUnlocked ? 0.06 : 0;
-      player.moveSpeed = player.baseMoveSpeed * (1 + effects.moveSpeedBonusPct + speedBoostMultiplier + rageMoveBonus);
+        player.moveSpeed = player.baseMoveSpeed * (1 + effects.moveSpeedBonusPct + speedBoostMultiplier + rageMoveBonus);
       const axisX = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
       const axisY = (keys.KeyS ? 1 : 0) - (keys.KeyW ? 1 : 0);
 
@@ -3359,6 +3593,12 @@
         const normalized = normalizeVector(moveX, moveY);
         moveX = normalized.x;
         moveY = normalized.y;
+      }
+      player.animationMoveX = moveX;
+      player.animationMoveY = moveY;
+      player.animationSpeed = Math.hypot(moveX, moveY);
+      if (Math.abs(moveX) > 0.001) {
+        player.spriteFacingX = moveX < 0 ? -1 : 1;
       }
 
       const travelX = moveX * player.moveSpeed * dt;
@@ -3631,23 +3871,27 @@
       const difficultySpeedScale = this.getDifficultyScalingValue(run, "enemySpeedMultiplier");
       const difficultyXpScale = this.getDifficultyScalingValue(run, "enemyXpMultiplier");
 
-      const margin = 48;
-      const side = randInt(0, 3);
+      // Spawn on fixed world edges so distance remains resolution-independent.
+      const margin = 0;
+      const chooseEdgeSpawnPosition = () => {
+        const side = randInt(0, 3);
+        if (side === 0) {
+          return { x: randRange(-margin, world.width + margin), y: -margin };
+        }
+        if (side === 1) {
+          return { x: world.width + margin, y: randRange(-margin, world.height + margin) };
+        }
+        if (side === 2) {
+          return { x: randRange(-margin, world.width + margin), y: world.height + margin };
+        }
+        return { x: -margin, y: randRange(-margin, world.height + margin) };
+      };
+
       let x = 0;
       let y = 0;
-      if (side === 0) {
-        x = randRange(-margin, world.width + margin);
-        y = -margin;
-      } else if (side === 1) {
-        x = world.width + margin;
-        y = randRange(-margin, world.height + margin);
-      } else if (side === 2) {
-        x = randRange(-margin, world.width + margin);
-        y = world.height + margin;
-      } else {
-        x = -margin;
-        y = randRange(-margin, world.height + margin);
-      }
+      const edgeSpawn = chooseEdgeSpawnPosition();
+      x = edgeSpawn.x;
+      y = edgeSpawn.y;
 
       if (options && options.forceInside) {
         x = randRange(definition.radius + 20, world.width - definition.radius - 20);
@@ -3667,14 +3911,15 @@
         const obstaclePadding = obstacleConfig.enemyCollisionPadding;
         if (this.isCircleOverlappingAnyObstacle(x, y, definition.radius, obstacles, obstaclePadding)) {
           for (let attempt = 0; attempt < 14; attempt += 1) {
+            const candidateEdgeSpawn = chooseEdgeSpawnPosition();
             const candidateX =
               options && options.forceInside
                 ? randRange(definition.radius + 20, world.width - definition.radius - 20)
-                : randRange(-margin, world.width + margin);
+                : candidateEdgeSpawn.x;
             const candidateY =
               options && options.forceInside
                 ? randRange(definition.radius + 20, world.height - definition.radius - 20)
-                : randRange(-margin, world.height + margin);
+                : candidateEdgeSpawn.y;
             if (!this.isCircleOverlappingAnyObstacle(candidateX, candidateY, definition.radius, obstacles, obstaclePadding)) {
               x = candidateX;
               y = candidateY;
@@ -4914,11 +5159,23 @@
       const run = this.currentRun;
       if (!run) return;
       const ctx = this.ctx;
+      const viewport = this.getRenderViewport(run);
+      const screenWidth = viewport.screenWidth;
+      const screenHeight = viewport.screenHeight;
       const width = run.world.width;
       const height = run.world.height;
 
-      ctx.clearRect(0, 0, width, height);
+      ctx.clearRect(0, 0, screenWidth, screenHeight);
+      // Letterbox/background area outside fixed play area.
+      ctx.fillStyle = "#090d14";
+      ctx.fillRect(0, 0, screenWidth, screenHeight);
+
+      ctx.save();
+      ctx.translate(viewport.offsetX, viewport.offsetY);
+      ctx.scale(viewport.scale, viewport.scale);
+
       this.drawBackgroundGrid(width, height);
+      this.drawFixedWorldGuides();
       this.drawObstacles();
       this.drawPickups();
       this.drawOffscreenPowerupIndicators();
@@ -4930,6 +5187,8 @@
       this.drawTopTimers();
       this.drawSwarmBanner();
       this.drawVictoryCountdown();
+
+      ctx.restore();
     }
 
     drawBackgroundGrid(width, height) {
@@ -4955,6 +5214,30 @@
         ctx.lineTo(width, y);
         ctx.stroke();
       }
+    }
+
+    drawFixedWorldGuides() {
+      const run = this.currentRun;
+      if (!run || !run.debug || !run.debug.showFixedWorldGuides) return;
+      const ctx = this.ctx;
+      const width = run.world.width;
+      const height = run.world.height;
+      const centerX = width * 0.5;
+      const centerY = height * 0.5;
+      const spawnRingRadius = FIXED_WORLD_TILE_SIZE * 10;
+
+      ctx.save();
+      ctx.strokeStyle = "rgba(120, 220, 255, 0.7)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 6]);
+      ctx.strokeRect(1, 1, Math.max(2, width - 2), Math.max(2, height - 2));
+
+      ctx.strokeStyle = "rgba(255, 190, 96, 0.75)";
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, spawnRingRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
     }
 
     drawObstacles() {
@@ -5047,6 +5330,23 @@
       const run = this.currentRun;
       run.entities.enemies.forEach((enemy) => {
         if (enemy.dead) return;
+        const sprite = this.getEnemySprite(enemy.typeId);
+        if (sprite) {
+          const sourceW = Math.max(1, Number(sprite.naturalWidth || 1));
+          const sourceH = Math.max(1, Number(sprite.naturalHeight || 1));
+          const aspect = sourceW / sourceH;
+          const renderHeight = Math.max(enemy.radius * 2.35, enemy.radius * 2 + 4);
+          const renderWidth = renderHeight * aspect;
+          const left = enemy.x - renderWidth * 0.5;
+          const top = enemy.y + enemy.radius - renderHeight;
+          const previousSmoothing = ctx.imageSmoothingEnabled;
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(sprite, left, top, renderWidth, renderHeight);
+          ctx.imageSmoothingEnabled = previousSmoothing;
+          this.drawEnemyHealthBar(enemy);
+          return;
+        }
+
         ctx.fillStyle = enemy.color;
         if (enemy.typeId === "shooter") {
           ctx.beginPath();

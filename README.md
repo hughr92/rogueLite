@@ -10,7 +10,9 @@ Local-only browser roguelike survival prototype built with HTML, CSS, and vanill
 - `save.js` - localStorage character persistence
 - `ui.js` - DOM/UI controller for menus and overlays
 - `game.js` - game loop, combat, enemy AI, progression, rewards
+- `tools/index.html` - internal tools launch page
 - `tools/map-editor/` - standalone map editor app for intentional layout authoring
+- `tools/sprite-builder/` - standalone sprite builder/editor app for character asset workflows
 
 ## Run Locally
 
@@ -31,6 +33,21 @@ No backend, package install, or build step is required.
 Open `tools/map-editor/index.html` in a browser to launch the standalone map editor.
 
 Editor outputs JSON map files with layout data (terrain, boundaries, crossings) and a theme ID for runtime rendering.
+
+## Sprite Builder
+
+Open `tools/sprite-builder/index.html` in a browser to launch the standalone sprite builder/editor.
+
+The tool supports:
+
+- prompt + style driven concept generation
+- reference image uploads with primary selection
+- master lock and directional idle generation (4-way or 8-way)
+- frame touch-up editing (pencil/eraser/picker, undo/redo, zoom/pan, grid/onion toggle)
+- animation preview and WASD movement sandbox
+- PNG sheet + JSON manifest export and validation warnings
+
+For AI image generation, run `node tools/sprite-builder/server.js` with `OPENAI_API_KEY` set.
 
 ## Tuning Guide
 

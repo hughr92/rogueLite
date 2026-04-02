@@ -1,0 +1,89 @@
+:root {
+  --bg: #0d1118;
+  --panel: #1a2435;
+  --border: #3d5178;
+  --text: #edf3ff;
+  --muted: #aebdd9;
+  --accent: #4f8aff;
+  --accent-strong: #316bd8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  min-height: 100%;
+  color: var(--text);
+  background: radial-gradient(circle at top, #1b2740 0%, #111824 52%, #0d1118 100%);
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+.tools-root {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1rem;
+  display: grid;
+  gap: 0.95rem;
+}
+
+.tools-header {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #1c283c 0%, #182233 100%);
+  padding: 0.95rem;
+}
+
+.tools-header h1 {
+  margin: 0 0 0.3rem;
+}
+
+.tools-header p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.9rem;
+}
+
+.tool-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #1c283c 0%, #151f30 100%);
+  padding: 0.9rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.tool-card h2 {
+  margin: 0;
+  font-size: 1.08rem;
+}
+
+.tool-card p {
+  margin: 0;
+  color: #cedaf3;
+  font-size: 0.92rem;
+}
+
+.tool-link {
+  justify-self: start;
+  margin-top: 0.12rem;
+  color: #f3f7ff;
+  text-decoration: none;
+  border: 1px solid #5e84ce;
+  border-radius: 9px;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+  padding: 0.46rem 0.72rem;
+  font-size: 0.9rem;
+}
+
+.tool-link:hover {
+  filter: brightness(1.1);
+}

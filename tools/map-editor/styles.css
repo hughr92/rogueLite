@@ -255,6 +255,10 @@ body {
   cursor: pointer;
 }
 
+.topbar-link {
+  text-decoration: none;
+}
+
 .btn:hover {
   background: #334767;
 }

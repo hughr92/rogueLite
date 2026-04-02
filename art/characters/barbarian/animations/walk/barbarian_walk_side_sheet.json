@@ -1,0 +1,16 @@
+{
+  "animationName": "barbarian_walk_side",
+  "sourceImage": "barbarian_walk_side_sheet_corrected.png",
+  "frameWidth": 336,
+  "frameHeight": 400,
+  "frameCount": 4,
+  "loop": true,
+  "spacing": 0,
+  "margin": 0,
+  "frames": [
+    { "index": 0, "x": 0,    "y": 0, "w": 336, "h": 400, "duration": 100 },
+    { "index": 1, "x": 336,  "y": 0, "w": 336, "h": 400, "duration": 100 },
+    { "index": 2, "x": 672,  "y": 0, "w": 336, "h": 400, "duration": 100 },
+    { "index": 3, "x": 1008, "y": 0, "w": 336, "h": 400, "duration": 100 }
+  ]
+}

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RL Sprite Builder (MVP)</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="builder-root">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1>Sprite Builder</h1>
+        <p>AI-first sprite workflow: prompt, reference, refine, and export.</p>
+      </div>
+      <div class="topbar-actions">
+        <a class="btn" href="../index.html">Tools</a>
+        <a class="btn" href="../map-editor/index.html">Map Editor</a>
+      </div>
+    </header>
+
+    <section class="project-bar panel">
+      <div class="project-controls">
+        <label for="projectSelect">Project</label>
+        <select id="projectSelect" class="input"></select>
+        <button id="newProjectBtn" class="btn" type="button">New Project</button>
+        <button id="duplicateProjectBtn" class="btn" type="button">Duplicate</button>
+        <button id="deleteProjectBtn" class="btn btn-danger" type="button">Delete</button>
+        <button id="saveProjectBtn" class="btn btn-primary" type="button">Save Local</button>
+      </div>
+      <div class="project-status" id="projectStatus">Ready.</div>
+    </section>
+
+    <main class="workspace">
+      <section class="panel prompt-panel">
+        <h2>Prompt / Input</h2>
+        <p class="workflow-hint">Prompt -> Generate Concepts -> Select Master -> Generate Frames -> Refine -> Export</p>
+        <div class="field-grid">
+          <label for="characterNameInput">Character Name</label>
+          <input id="characterNameInput" class="input" type="text" maxlength="32" placeholder="barbarian">
+
+          <label for="promptInput">Prompt</label>
+          <textarea id="promptInput" class="input" rows="3" placeholder="broad-shouldered barbarian, dark fantasy pixel sprite"></textarea>
+
+          <label for="negativePromptInput">Negative Prompt (optional)</label>
+          <textarea id="negativePromptInput" class="input" rows="2" placeholder="blurry, extra limbs, text, busy background"></textarea>
+
+          <label for="stylePresetSelect">Style Preset</label>
+          <select id="stylePresetSelect" class="input"></select>
+
+          <label for="spriteSizeInput">Sprite Size</label>
+          <input id="spriteSizeInput" class="input" type="number" min="24" max="128" step="2" value="48">
+
+          <label for="directionSetSelect">Direction Set</label>
+          <select id="directionSetSelect" class="input">
+            <option value="4">4-direction</option>
+            <option value="8">8-direction</option>
+          </select>
+
+          <label for="animationTypeSelect">Animation Type</label>
+          <select id="animationTypeSelect" class="input">
+            <option value="idle">Idle</option>
+          </select>
+
+          <label for="generationModeSelect">Generation Mode</label>
+          <select id="generationModeSelect" class="input">
+            <option value="concept">Concept (Text-to-Image)</option>
+            <option value="reference">Reference (Image-to-Image)</option>
+            <option value="edit">Edit (Targeted Regeneration)</option>
+          </select>
+
+          <label for="generationEndpointInput">Generation Endpoint</label>
+          <input
+            id="generationEndpointInput"
+            class="input"
+            type="url"
+            value="http://localhost:8787/api/images/generate"
+            placeholder="http://localhost:8787/api/images/generate"
+            autocomplete="off"
+          >
+
+          <label for="conceptCountInput">Concept Count (1-6)</label>
+          <input id="conceptCountInput" class="input" type="number" min="1" max="6" step="1" value="1">
+        </div>
+        <div class="action-row">
+          <button id="generateConceptsBtn" class="btn btn-primary" type="button">Generate Concepts</button>
+          <button id="clearConceptsBtn" class="btn" type="button">Clear Concepts</button>
+        </div>
+      </section>
+
+      <section class="panel references-panel">
+        <h2>References</h2>
+        <div class="reference-actions">
+          <label class="btn" for="referenceUploadInput">Upload Reference Images</label>
+          <input id="referenceUploadInput" class="hidden" type="file" accept="image/*" multiple>
+        </div>
+        <div class="reference-url-row">
+          <input
+            id="referenceUrlInput"
+            class="input"
+            type="url"
+            placeholder="https://example.com/sprite-reference.png"
+            autocomplete="off"
+          >
+          <button id="addReferenceUrlBtn" class="btn" type="button">Add Image URL</button>
+        </div>
+        <div id="referencesGrid" class="references-grid"></div>
+      </section>
+
+      <section class="panel concept-panel">
+        <h2>Concept Grid</h2>
+        <p class="muted">Generate 1-6 variants, then select one as the master.</p>
+        <div id="conceptGrid" class="concept-grid"></div>
+        <div class="candidate-title">Saved Candidates</div>
+        <div id="candidateGrid" class="candidate-grid"></div>
+      </section>
+
+      <section class="panel master-panel">
+        <h2>Master Lock</h2>
+        <div id="masterCard" class="master-card empty">No master selected.</div>
+        <label for="masterNotesInput">Notes</label>
+        <textarea id="masterNotesInput" class="input" rows="3" placeholder="Notes for consistency, cleanup tasks, export notes..."></textarea>
+        <div class="action-row">
+          <button id="saveMasterNotesBtn" class="btn" type="button">Save Notes</button>
+          <button id="generateDirectionBtn" class="btn" type="button">Generate Direction</button>
+          <button id="generateAllDirectionsBtn" class="btn btn-primary" type="button">Generate All Directions</button>
+        </div>
+        <div id="directionButtons" class="direction-buttons"></div>
+      </section>
+
+      <section class="panel frame-panel">
+        <h2>Frame Editor</h2>
+        <div class="editor-toolbar">
+          <div class="tool-group">
+            <button class="btn editor-tool-btn active" data-editor-tool="pencil" type="button">Pencil</button>
+            <button class="btn editor-tool-btn" data-editor-tool="eraser" type="button">Eraser</button>
+            <button class="btn editor-tool-btn" data-editor-tool="picker" type="button">Picker</button>
+          </div>
+          <div class="tool-group">
+            <button id="editorUndoBtn" class="btn" type="button">Undo</button>
+            <button id="editorRedoBtn" class="btn" type="button">Redo</button>
+            <button id="editorZoomOutBtn" class="btn" type="button">-</button>
+            <button id="editorZoomInBtn" class="btn" type="button">+</button>
+            <button id="editorResetPanBtn" class="btn" type="button">Reset Pan</button>
+          </div>
+          <div class="tool-group">
+            <label><input id="editorGridChk" type="checkbox" checked> Grid</label>
+            <label><input id="editorOnionChk" type="checkbox"> Onion</label>
+            <input id="editorColorInput" class="input color-input" type="color" value="#d9a066">
+          </div>
+        </div>
+        <div id="paletteSwatches" class="palette-swatches"></div>
+        <div id="frameStrip" class="frame-strip"></div>
+        <div class="action-row frame-gen-actions">
+          <button id="generateFrameVariantBtn" class="btn" type="button">Generate Frame Variant</button>
+          <button id="regenerateSelectedFrameBtn" class="btn btn-primary" type="button">Regenerate Selected Frame</button>
+        </div>
+        <canvas id="frameEditorCanvas" width="560" height="430"></canvas>
+      </section>
+
+      <section class="panel preview-panel">
+        <h2>Animation Preview</h2>
+        <div class="preview-controls">
+          <button id="previewPlayPauseBtn" class="btn" type="button">Pause</button>
+          <button id="previewStepBtn" class="btn" type="button">Step</button>
+          <label><input id="previewLoopChk" type="checkbox" checked> Loop</label>
+          <label for="previewSpeedInput">Speed</label>
+          <input id="previewSpeedInput" class="input compact" type="range" min="0.4" max="2.5" step="0.1" value="1">
+          <span id="previewSpeedValue">1.0x</span>
+          <label for="previewScaleSelect">Scale</label>
+          <select id="previewScaleSelect" class="input compact">
+            <option value="1">1x</option>
+            <option value="2" selected>2x</option>
+            <option value="4">4x</option>
+            <option value="gameplay">Gameplay</option>
+          </select>
+        </div>
+        <canvas id="animationPreviewCanvas" width="330" height="260"></canvas>
+      </section>
+
+      <section class="panel sandbox-panel">
+        <h2>Movement Sandbox (WASD)</h2>
+        <p class="muted">Press WASD to test facing and readability at runtime scale.</p>
+        <canvas id="sandboxCanvas" width="500" height="220"></canvas>
+      </section>
+
+      <section class="panel export-panel">
+        <h2>Export / Validation</h2>
+        <div class="export-grid">
+          <label for="exportAnimationNameInput">Animation Name</label>
+          <input id="exportAnimationNameInput" class="input" type="text" value="barbarian_idle">
+
+          <label for="exportMarginInput">Margin</label>
+          <input id="exportMarginInput" class="input" type="number" min="0" max="32" step="1" value="4">
+
+          <label for="exportSpacingInput">Spacing</label>
+          <input id="exportSpacingInput" class="input" type="number" min="0" max="32" step="1" value="4">
+
+          <label for="exportDurationInput">Frame Duration (ms)</label>
+          <input id="exportDurationInput" class="input" type="number" min="40" max="1000" step="10" value="120">
+
+          <label for="exportLoopChk">Loop</label>
+          <input id="exportLoopChk" type="checkbox" checked>
+        </div>
+        <div class="action-row">
+          <button id="runValidationBtn" class="btn" type="button">Run Validation</button>
+          <button id="exportCurrentFrameBtn" class="btn" type="button">Export Current Frame</button>
+          <button id="exportCurrentDirectionBtn" class="btn" type="button">Export Current Direction</button>
+          <button id="exportAllDirectionsBtn" class="btn btn-primary" type="button">Export All Directions</button>
+        </div>
+        <div id="validationBox" class="validation-box"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="builder.js"></script>
+</body>
+</html>
