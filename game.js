@@ -99,12 +99,22 @@
   const UPGRADE_BY_ID = Object.fromEntries(DATA.UPGRADES.map((upgrade) => [upgrade.id, upgrade]));
   const POST_CAP_REWARD_HEALTH_ID = "post_cap_health_50pct";
   const POST_CAP_REWARD_GOLD_ID = "post_cap_gold_50";
+  const POST_CAP_REWARD_BALANCED_ID = "post_cap_balanced_25";
   const MAX_SKILL_CHOICES_PER_RUN = Math.max(1, Math.floor(Number((DATA.RUN && DATA.RUN.maxSkillChoicesPerRun) || 4)));
+  const AUDIO_SETTINGS_STORAGE_KEY = "rlgame_audio_settings_v1";
+  const DEFAULT_AUDIO_SETTINGS = Object.freeze({
+    musicVolume: 0.42,
+    musicMuted: false
+  });
+  const MUSIC_BOSS_CROSSFADE_SECONDS = 1.2;
   const FIXED_WORLD_TILE_SIZE = 48;
   const FIXED_WORLD_TILES_WIDE = 20;
   const FIXED_WORLD_TILES_TALL = 20;
   const FIXED_WORLD_WIDTH = FIXED_WORLD_TILE_SIZE * FIXED_WORLD_TILES_WIDE;
   const FIXED_WORLD_HEIGHT = FIXED_WORLD_TILE_SIZE * FIXED_WORLD_TILES_TALL;
+  // Source top-down sprite faces "up" by default.
+  const BARBARIAN_TOP_SPRITE_FORWARD_ANGLE = Math.PI / 2;
+  const ENEMY_TOP_SPRITE_FORWARD_ANGLE = Math.PI / 2;
 
   class GameApp {
     constructor() {
@@ -130,6 +140,14 @@
       this.chestSprites = this.createChestSprites();
       this.characterSprites = this.createCharacterSprites();
       this.enemySprites = this.createEnemySprites();
+      this.enemyProjectileSprites = this.createEnemyProjectileSprites();
+      this.audioSettings = this.loadAudioSettings();
+      this.backgroundMusicTracks = this.createBackgroundMusicTracks();
+      this.musicState = {
+        bossBlend: 0,
+        targetBossBlend: 0,
+        crossfadeSeconds: MUSIC_BOSS_CROSSFADE_SECONDS
+      };
       this.renderViewport = {
         screenWidth: 1,
         screenHeight: 1,
@@ -144,6 +162,239 @@
 
       this.boundLoop = this.loop.bind(this);
       this.boundResize = this.handleResize.bind(this);
+    }
+
+    createMusicTrack(src) {
+      if (typeof Audio === "undefined") return null;
+      const audio = new Audio(src);
+      audio.loop = true;
+      audio.preload = "auto";
+      return audio;
+    }
+
+    createBackgroundMusicTracks() {
+      const base = this.createMusicTrack("assets/music/game/background_1.mp3");
+      const boss = this.createMusicTrack("assets/music/game/background_1_boss.mp3");
+      return { base, boss };
+    }
+
+    getBackgroundMusicTracksList() {
+      const tracks = this.backgroundMusicTracks || {};
+      return [tracks.base, tracks.boss].filter(Boolean);
+    }
+
+    loadAudioSettings() {
+      const fallback = {
+        musicVolume: DEFAULT_AUDIO_SETTINGS.musicVolume,
+        musicMuted: DEFAULT_AUDIO_SETTINGS.musicMuted
+      };
+      if (typeof localStorage === "undefined") return fallback;
+      try {
+        const raw = localStorage.getItem(AUDIO_SETTINGS_STORAGE_KEY);
+        if (!raw) return fallback;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return fallback;
+        const volume = clamp(Number(parsed.musicVolume), 0, 1);
+        const muted = Boolean(parsed.musicMuted);
+        return {
+          musicVolume: Number.isFinite(volume) ? volume : fallback.musicVolume,
+          musicMuted: muted
+        };
+      } catch (error) {
+        return fallback;
+      }
+    }
+
+    saveAudioSettings() {
+      if (typeof localStorage === "undefined") return;
+      try {
+        localStorage.setItem(
+          AUDIO_SETTINGS_STORAGE_KEY,
+          JSON.stringify({
+            musicVolume: clamp(Number(this.audioSettings && this.audioSettings.musicVolume), 0, 1),
+            musicMuted: Boolean(this.audioSettings && this.audioSettings.musicMuted)
+          })
+        );
+      } catch (error) {
+        // Ignore storage errors.
+      }
+    }
+
+    applyBackgroundMusicSettings(audio, settings) {
+      if (!audio) return;
+      const source = settings && typeof settings === "object" ? settings : DEFAULT_AUDIO_SETTINGS;
+      const muted = Boolean(source.musicMuted);
+      audio.muted = muted;
+    }
+
+    syncMusicTrackVolumes() {
+      const tracks = this.backgroundMusicTracks || {};
+      const baseTrack = tracks.base || null;
+      const bossTrack = tracks.boss || null;
+      const source = this.audioSettings && typeof this.audioSettings === "object" ? this.audioSettings : DEFAULT_AUDIO_SETTINGS;
+      const baseVolume = clamp(Number(source.musicVolume), 0, 1);
+      const muted = Boolean(source.musicMuted);
+      const bossBlend = clamp(Number(this.musicState && this.musicState.bossBlend), 0, 1);
+
+      if (baseTrack) {
+        baseTrack.volume = baseVolume * (1 - bossBlend);
+        baseTrack.muted = muted;
+      }
+      if (bossTrack) {
+        bossTrack.volume = baseVolume * bossBlend;
+        bossTrack.muted = muted;
+      }
+    }
+
+    applyAudioSettings() {
+      const tracks = this.getBackgroundMusicTracksList();
+      if (!tracks.length) return;
+      tracks.forEach((track) => this.applyBackgroundMusicSettings(track, this.audioSettings));
+      this.syncMusicTrackVolumes();
+      const runActive = this.currentRun && !this.currentRun.ended;
+      const shouldPlay =
+        runActive &&
+        !Boolean(this.audioSettings && this.audioSettings.musicMuted) &&
+        clamp(Number(this.audioSettings && this.audioSettings.musicVolume), 0, 1) > 0.0001;
+      if (shouldPlay) {
+        this.playBackgroundMusic();
+      } else {
+        tracks.forEach((track) => {
+          if (!track.paused) track.pause();
+        });
+      }
+    }
+
+    getAudioSettingsControlSets() {
+      const homeSet = {
+        volumeInput: document.getElementById("bgmVolumeInput"),
+        volumeValue: document.getElementById("bgmVolumeValue"),
+        muteChk: document.getElementById("bgmMuteChk")
+      };
+      const pauseSet = {
+        volumeInput: document.getElementById("bgmVolumeInputPause"),
+        volumeValue: document.getElementById("bgmVolumeValuePause"),
+        muteChk: document.getElementById("bgmMuteChkPause")
+      };
+
+      return [homeSet, pauseSet].filter((set) => set.volumeInput && set.volumeValue);
+    }
+
+    syncAudioSettingsUi() {
+      const controlSets = this.getAudioSettingsControlSets();
+      if (!controlSets.length) return;
+      const volumePct = Math.round(clamp(Number(this.audioSettings && this.audioSettings.musicVolume), 0, 1) * 100);
+      controlSets.forEach((set) => {
+        set.volumeInput.value = String(volumePct);
+        set.volumeValue.textContent = `${volumePct}%`;
+        if (set.muteChk) {
+          set.muteChk.checked = Boolean(this.audioSettings && this.audioSettings.musicMuted);
+        }
+      });
+    }
+
+    wireAudioSettingsControls() {
+      const controlSets = this.getAudioSettingsControlSets();
+      if (!controlSets.length) return;
+
+      this.syncAudioSettingsUi();
+
+      controlSets.forEach((set) => {
+        const applyVolume = () => {
+          const volumePct = clamp(Math.floor(Number(set.volumeInput.value || 0)), 0, 100);
+          this.audioSettings.musicVolume = volumePct / 100;
+          this.syncAudioSettingsUi();
+          this.saveAudioSettings();
+          this.applyAudioSettings();
+        };
+
+        set.volumeInput.addEventListener("input", applyVolume);
+        set.volumeInput.addEventListener("change", applyVolume);
+
+        if (set.muteChk) {
+          set.muteChk.addEventListener("change", () => {
+            this.audioSettings.musicMuted = Boolean(set.muteChk.checked);
+            this.syncAudioSettingsUi();
+            this.saveAudioSettings();
+            this.applyAudioSettings();
+          });
+        }
+      });
+    }
+
+    playBackgroundMusic() {
+      const tracks = this.getBackgroundMusicTracksList();
+      if (!tracks.length) return;
+      if (Boolean(this.audioSettings && this.audioSettings.musicMuted)) return;
+      if (clamp(Number(this.audioSettings && this.audioSettings.musicVolume), 0, 1) <= 0.0001) return;
+
+      const runningTrack = tracks.find((track) => !track.paused && !track.ended);
+      const anchorTime = runningTrack ? Number(runningTrack.currentTime || 0) : Number((tracks[0] && tracks[0].currentTime) || 0);
+
+      tracks.forEach((track) => {
+        if (!track) return;
+        if (!Number.isNaN(anchorTime) && Math.abs(Number(track.currentTime || 0) - anchorTime) > 0.12) {
+          track.currentTime = anchorTime;
+        }
+        if (!track.paused && !track.ended) return;
+        const playResult = track.play();
+        if (playResult && typeof playResult.catch === "function") {
+          playResult.catch(() => {
+            // Autoplay restrictions can block playback until user interaction.
+          });
+        }
+      });
+    }
+
+    stopBackgroundMusic() {
+      const tracks = this.getBackgroundMusicTracksList();
+      tracks.forEach((track) => {
+        if (!track) return;
+        if (!track.paused) track.pause();
+        track.currentTime = 0;
+      });
+    }
+
+    hasActiveBossEncounter(run) {
+      if (!run || !run.entities || !Array.isArray(run.entities.enemies)) return false;
+      return run.entities.enemies.some((enemy) => {
+        if (!enemy || enemy.dead) return false;
+        return enemy.typeId === "miniboss" || enemy.typeId === "finalBoss";
+      });
+    }
+
+    resetBossMusicBlend() {
+      if (!this.musicState) return;
+      this.musicState.bossBlend = 0;
+      this.musicState.targetBossBlend = 0;
+      this.syncMusicTrackVolumes();
+    }
+
+    updateMusicTargetByEncounter() {
+      if (!this.musicState) return;
+      const run = this.currentRun;
+      const hasBoss = run && !run.ended && this.hasActiveBossEncounter(run);
+      this.musicState.targetBossBlend = hasBoss ? 1 : 0;
+    }
+
+    updateMusicCrossfade(dt) {
+      if (!this.musicState) return;
+      const safeDt = Math.max(0, Number(dt || 0));
+      if (safeDt <= 0) return;
+
+      const state = this.musicState;
+      const duration = Math.max(0.05, Number(state.crossfadeSeconds || MUSIC_BOSS_CROSSFADE_SECONDS));
+      const target = clamp(Number(state.targetBossBlend || 0), 0, 1);
+      const current = clamp(Number(state.bossBlend || 0), 0, 1);
+      if (Math.abs(target - current) <= 0.0001) return;
+
+      const delta = safeDt / duration;
+      const next =
+        target > current
+          ? Math.min(target, current + delta)
+          : Math.max(target, current - delta);
+      state.bossBlend = clamp(next, 0, 1);
+      this.syncMusicTrackVolumes();
     }
 
     createObstacleSprites(terrainTypes) {
@@ -173,12 +424,31 @@
     createEnemySprites() {
       if (typeof Image === "undefined") return {};
       const byTypeId = {
-        grunt: "images/enemies/melee_basic/1_raider/base/skeleton_melee.png"
+        grunt: "images/enemies/melee_basic/1_raider/base/skeleton_melee_top.png",
+        runner: "images/enemies/melee_fast/1_skitter/base/skeleton_skitter_top.png",
+        shooter: "images/enemies/ranged_archer/1_hex_archer/base/skeleton_archer_top.png",
+        dasher: "images/enemies/melee_charge/1_lancer/base/skeleton_lancer_top.png",
+        shieldbearer_shielded: "images/enemies/melee_tank/1_bulwark/base/skeleton_bulwark_top_shield.png",
+        shieldbearer_broken: "images/enemies/melee_tank/1_bulwark/base/skeleton_bulwark_top_shieldGone.png"
       };
       const sprites = {};
       Object.keys(byTypeId).forEach((typeId) => {
         const image = new Image();
         image.src = byTypeId[typeId];
+        sprites[typeId] = image;
+      });
+      return sprites;
+    }
+
+    createEnemyProjectileSprites() {
+      if (typeof Image === "undefined") return {};
+      const bySourceTypeId = {
+        shooter: "images/enemies/ranged_archer/1_hex_archer/projectile/arrow.svg"
+      };
+      const sprites = {};
+      Object.keys(bySourceTypeId).forEach((typeId) => {
+        const image = new Image();
+        image.src = bySourceTypeId[typeId];
         sprites[typeId] = image;
       });
       return sprites;
@@ -192,15 +462,37 @@
       return image;
     }
 
+    getEnemySpriteForEntity(enemy) {
+      if (!enemy || typeof enemy !== "object") return null;
+      const typeId = String(enemy.typeId || "").trim();
+      if (!typeId) return null;
+
+      if (typeId === "shieldbearer") {
+        const hasShield = Number(enemy.maxShieldHp || 0) > 0 && Number(enemy.shieldHp || 0) > 0;
+        const variantId = hasShield ? "shieldbearer_shielded" : "shieldbearer_broken";
+        return this.getEnemySprite(variantId);
+      }
+
+      return this.getEnemySprite(typeId);
+    }
+
+    getEnemyProjectileSprite(sourceTypeId) {
+      if (!this.enemyProjectileSprites || typeof this.enemyProjectileSprites !== "object") return null;
+      const key = String(sourceTypeId || "").trim();
+      const image = key ? this.enemyProjectileSprites[key] : null;
+      if (!image || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      return image;
+    }
+
     createCharacterSprites() {
       if (typeof Image === "undefined") return {};
       const staticImage = new Image();
-      staticImage.src = "art/characters/barbarian/barbarian_static_2.png";
+      staticImage.src = "art/characters/barbarian/barbarian_static_top.png";
       return {
         barbarian: {
           static: {
             image: staticImage,
-            renderHeight: 66
+            renderHeight: 48
           }
         }
       };
@@ -347,18 +639,16 @@
       const sourceH = Number(frame.sourceH || frame.image.naturalHeight || 1);
       const aspect = sourceW / sourceH;
       const renderWidth = renderHeight * aspect;
-      const left = player.x - renderWidth * 0.5;
-      const top = player.y + player.radius - renderHeight;
+      const aimFacing = Number(player && player.facing);
+      const rotation = Number.isFinite(aimFacing)
+        ? aimFacing - BARBARIAN_TOP_SPRITE_FORWARD_ANGLE
+        : 0;
       const previousSmoothing = ctx.imageSmoothingEnabled;
       ctx.imageSmoothingEnabled = false;
-      const mirrorLeft = Number(player && player.spriteFacingX) < 0;
-      if (mirrorLeft) {
-        ctx.save();
-        ctx.translate(player.x, 0);
-        ctx.scale(-1, 1);
-      }
+      ctx.save();
+      ctx.translate(player.x, player.y);
+      ctx.rotate(rotation);
 
-      const drawLeft = mirrorLeft ? -renderWidth * 0.5 : left;
       if (typeof frame.sourceX === "number") {
         ctx.drawImage(
           frame.image,
@@ -366,18 +656,16 @@
           frame.sourceY,
           sourceW,
           sourceH,
-          drawLeft,
-          top,
+          -renderWidth * 0.5,
+          -renderHeight * 0.5,
           renderWidth,
           renderHeight
         );
       } else {
-        ctx.drawImage(frame.image, drawLeft, top, renderWidth, renderHeight);
+        ctx.drawImage(frame.image, -renderWidth * 0.5, -renderHeight * 0.5, renderWidth, renderHeight);
       }
 
-      if (mirrorLeft) {
-        ctx.restore();
-      }
+      ctx.restore();
       ctx.imageSmoothingEnabled = previousSmoothing;
       return true;
     }
@@ -405,6 +693,8 @@
       });
 
       this.installInputListeners();
+      this.wireAudioSettingsControls();
+      this.applyAudioSettings();
       this.handleResize();
       window.addEventListener("resize", this.boundResize);
 
@@ -775,6 +1065,8 @@
           id: skill.id,
           name: skill.name || skill.id,
           description: skill.description || "",
+          type: skill.type || "",
+          category: skill.category || "",
           keybind: skill.keybind || "",
           unlockRunLevel
         };
@@ -809,6 +1101,68 @@
       });
 
       return state;
+    }
+
+    buildClassSkillHudEntries(run) {
+      if (!run || !run.classSkills) return [];
+      const metadataById =
+        run.classSkills.metadataById && typeof run.classSkills.metadataById === "object"
+          ? run.classSkills.metadataById
+          : {};
+      const unlockedIds =
+        run.classSkills.unlockedIds && typeof run.classSkills.unlockedIds === "object"
+          ? run.classSkills.unlockedIds
+          : {};
+
+      const entries = Object.values(metadataById)
+        .filter((metadata) => metadata && metadata.id)
+        .sort((a, b) => {
+          const aUnlock = Math.max(1, Math.floor(Number(a.unlockRunLevel || 1)));
+          const bUnlock = Math.max(1, Math.floor(Number(b.unlockRunLevel || 1)));
+          if (aUnlock !== bUnlock) return aUnlock - bUnlock;
+          return String(a.name || a.id).localeCompare(String(b.name || b.id));
+        })
+        .map((metadata) => {
+          const skillId = String(metadata.id || "").trim();
+          if (!skillId) return null;
+          const skillType = String(metadata.type || "").trim().toLowerCase();
+          const isUnlocked = unlockedIds[skillId] === true;
+          if (!isUnlocked) return null;
+          const runtimeEntry = this.getClassSkillRuntimeStateEntry(run, skillId) || {};
+          const keybindText = String(metadata.keybind || "").trim().toUpperCase();
+          let cooldownDuration = 0;
+          let cooldownRemaining = 0;
+          let statusText = "Ready";
+
+          if (skillType === "active") {
+            cooldownDuration = Math.max(0.01, Number(runtimeEntry.cooldownSeconds || 0));
+            cooldownRemaining = Math.max(0, Number(runtimeEntry.cooldownLeft || 0));
+            if (cooldownRemaining > 0) {
+              statusText = `Ready in ${cooldownRemaining.toFixed(1)}s`;
+            }
+          } else if (skillType === "passive_triggered") {
+            cooldownDuration = Math.max(0.01, Number(runtimeEntry.durationSeconds || 0));
+            cooldownRemaining = Math.max(0, Number(runtimeEntry.activeTimer || 0));
+            if (cooldownRemaining > 0) {
+              statusText = `Ready in ${cooldownRemaining.toFixed(1)}s`;
+            }
+          } else if (skillType === "passive") {
+            statusText = "Passive";
+          }
+
+          return {
+            id: skillId,
+            name: metadata.name || skillId,
+            type: skillType || "skill",
+            keybind: keybindText,
+            statusText,
+            cooldownDuration,
+            cooldownRemaining
+          };
+        })
+        .filter(Boolean);
+
+      return entries;
     }
 
     isClassSkillUnlocked(run, skillId) {
@@ -3349,6 +3703,7 @@
           animationMoveY: 0,
           animationSpeed: 0,
           spriteFacingX: 1,
+          spriteTravelFacing: 0,
           facing: 0,
           rage: {
             value: 0,
@@ -3463,6 +3818,9 @@
       this.ui.hideEndRun();
       this.handleResize();
       this.centerPlayerInWorld();
+      this.resetBossMusicBlend();
+      this.applyAudioSettings();
+      this.playBackgroundMusic();
     }
 
     restartRun() {
@@ -3481,6 +3839,9 @@
       this.ui.hideEndRun();
       this.handleResize();
       this.centerPlayerInWorld();
+      this.resetBossMusicBlend();
+      this.applyAudioSettings();
+      this.playBackgroundMusic();
     }
 
     centerPlayerInWorld() {
@@ -3496,6 +3857,7 @@
       this.ui.hidePause();
       this.ui.hideLevelUp();
       this.ui.hideEndRun();
+      this.stopBackgroundMusic();
     }
 
     pauseRun() {
@@ -3518,6 +3880,8 @@
         if (!this.currentRun.pauseReason && !this.currentRun.ended) {
           this.updateRun(delta);
         }
+        this.updateMusicTargetByEncounter();
+        this.updateMusicCrossfade(delta);
         this.renderRun();
         this.pushHud();
       }
@@ -3599,6 +3963,9 @@
       player.animationSpeed = Math.hypot(moveX, moveY);
       if (Math.abs(moveX) > 0.001) {
         player.spriteFacingX = moveX < 0 ? -1 : 1;
+      }
+      if (player.animationSpeed > 0.001) {
+        player.spriteTravelFacing = Math.atan2(moveY, moveX);
       }
 
       const travelX = moveX * player.moveSpeed * dt;
@@ -4232,6 +4599,7 @@
       const run = this.currentRun;
       run.entities.enemyProjectiles.push({
         id: this.nextEntityId(),
+        sourceTypeId: sourceEnemy && sourceEnemy.typeId ? sourceEnemy.typeId : null,
         x: sourceEnemy.x,
         y: sourceEnemy.y,
         vx: Math.cos(angle) * speed,
@@ -4248,6 +4616,7 @@
         const angle = (Math.PI * 2 * i) / count + run.time * 0.25;
         run.entities.enemyProjectiles.push({
           id: this.nextEntityId(),
+          sourceTypeId: sourceEnemy && sourceEnemy.typeId ? sourceEnemy.typeId : null,
           x: sourceEnemy.x,
           y: sourceEnemy.y,
           vx: Math.cos(angle) * speed,
@@ -4469,18 +4838,23 @@
       if (!run || run.pauseReason || run.ended) return;
       if (run.progression.pendingLevelUps <= 0) return;
 
+      const canOfferPostCapRewards = this.hasUnlockedAllClassSkills(run);
       let choices =
-        this.getRemainingUpgradeCount(run) > 0 ? this.generateUpgradeChoices() : this.generatePostCapRewardChoices();
-      if (!choices.length) {
+        this.getRemainingUpgradeCount(run) > 0
+          ? this.generateUpgradeChoices()
+          : canOfferPostCapRewards
+            ? this.generatePostCapRewardChoices()
+            : [];
+      if (!choices.length && canOfferPostCapRewards) {
         choices = this.generatePostCapRewardChoices();
       }
       if (!choices.length) {
         run.progression.pendingLevelUps = 0;
         return;
       }
-      run.progression.currentUpgradeChoices = choices;
+      run.progression.currentUpgradeChoices = this.ensureThreeUpgradeChoices(choices, canOfferPostCapRewards);
       run.pauseReason = "levelup";
-      this.ui.showLevelUp(choices);
+      this.ui.showLevelUp(run.progression.currentUpgradeChoices);
     }
 
     getUpgradeRankForRun(run, upgradeId) {
@@ -4498,7 +4872,8 @@
 
     doesUpgradeCountAsSkillChoice(upgrade) {
       if (!upgrade || typeof upgrade !== "object") return false;
-      return upgrade.type !== "ultimate";
+      // Skill-cap should only apply to class-skill picks, not weapon/generic upgrade trees.
+      return upgrade.type === "class_skill";
     }
 
     getSelectedSkillIdsForRun(run) {
@@ -4535,8 +4910,69 @@
           id: POST_CAP_REWARD_GOLD_ID,
           title: "Gold Stash",
           description: "Gain 50 gold."
+        },
+        {
+          id: POST_CAP_REWARD_BALANCED_ID,
+          title: "Balanced Recovery",
+          description: "Recover 25% max health and gain 25 gold."
         }
       ];
+    }
+
+    hasUnlockedAllClassSkills(run) {
+      if (!run || !run.classSkills) return true;
+      const metadataById =
+        run.classSkills.metadataById && typeof run.classSkills.metadataById === "object"
+          ? run.classSkills.metadataById
+          : {};
+      const unlockedIds =
+        run.classSkills.unlockedIds && typeof run.classSkills.unlockedIds === "object"
+          ? run.classSkills.unlockedIds
+          : {};
+      const skillIds = Object.keys(metadataById).filter((id) => String(id || "").trim().length > 0);
+      if (!skillIds.length) return true;
+      return skillIds.every((skillId) => unlockedIds[skillId] === true);
+    }
+
+    ensureThreeUpgradeChoices(choices, allowPostCapFallback) {
+      const result = [];
+      const seen = {};
+      const source = Array.isArray(choices) ? choices : [];
+      const canUsePostCapFallback = allowPostCapFallback !== false;
+      source.forEach((choice) => {
+        if (!choice || typeof choice !== "object") return;
+        const id = String(choice.id || "").trim();
+        if (!id || seen[id]) return;
+        seen[id] = true;
+        result.push(choice);
+      });
+
+      if (result.length >= 3) return result.slice(0, 3);
+
+      if (canUsePostCapFallback) {
+        const fallbacks = this.generatePostCapRewardChoices();
+        for (let i = 0; i < fallbacks.length && result.length < 3; i += 1) {
+          const option = fallbacks[i];
+          const id = String(option && option.id ? option.id : "").trim();
+          if (!id || seen[id]) continue;
+          seen[id] = true;
+          result.push(option);
+        }
+
+        // Final guard: if still short, repeat fallback options to keep 3 visible choices.
+        let loopIndex = 0;
+        while (result.length < 3 && fallbacks.length) {
+          const seed = fallbacks[loopIndex % fallbacks.length];
+          const cloneId = `${seed.id}_alt_${result.length + 1}`;
+          result.push({
+            ...seed,
+            id: cloneId
+          });
+          loopIndex += 1;
+        }
+      }
+
+      return result.slice(0, 3);
     }
 
     isUpgradeRequirementsMet(run, upgrade) {
@@ -4620,11 +5056,18 @@
       const upgrade = run.progression.currentUpgradeChoices.find((item) => item.id === upgradeId);
       if (!upgrade) return;
 
-      if (upgrade.id === POST_CAP_REWARD_HEALTH_ID) {
+      const normalizedUpgradeId = String(upgrade.id || "").trim();
+      if (normalizedUpgradeId === POST_CAP_REWARD_HEALTH_ID || normalizedUpgradeId.startsWith(`${POST_CAP_REWARD_HEALTH_ID}_alt_`)) {
         const healAmount = run.player.maxHp * 0.5;
         run.player.hp = Math.min(run.player.maxHp, run.player.hp + healAmount);
-      } else if (upgrade.id === POST_CAP_REWARD_GOLD_ID) {
+      } else if (normalizedUpgradeId === POST_CAP_REWARD_GOLD_ID || normalizedUpgradeId.startsWith(`${POST_CAP_REWARD_GOLD_ID}_alt_`)) {
         run.stats.goldEarned += 50;
+      } else if (
+        normalizedUpgradeId === POST_CAP_REWARD_BALANCED_ID ||
+        normalizedUpgradeId.startsWith(`${POST_CAP_REWARD_BALANCED_ID}_alt_`)
+      ) {
+        run.player.hp = Math.min(run.player.maxHp, run.player.hp + run.player.maxHp * 0.25);
+        run.stats.goldEarned += 25;
       } else if (upgrade.type === "class_skill") {
         const skillId = this.parseClassSkillIdFromOptionId(upgrade.id) || upgrade.skillId;
         const unlocked = this.applyClassSkillUnlock(run, skillId);
@@ -5151,7 +5594,8 @@
         rageActive: Boolean(run.player.rage && run.player.rage.active),
         rageSeconds: run.player.rage && typeof run.player.rage.timeLeft === "number" ? run.player.rage.timeLeft : 0,
         time: run.time,
-        xpProgress: run.progression.xpToNext > 0 ? run.progression.xp / run.progression.xpToNext : 0
+        xpProgress: run.progression.xpToNext > 0 ? run.progression.xp / run.progression.xpToNext : 0,
+        classSkills: this.buildClassSkillHudEntries(run)
       });
     }
 
@@ -5314,15 +5758,6 @@
         ctx.stroke();
       }
 
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(player.x, player.y);
-      ctx.lineTo(
-        player.x + Math.cos(player.facing) * (player.radius + 11),
-        player.y + Math.sin(player.facing) * (player.radius + 11)
-      );
-      ctx.stroke();
     }
 
     drawEnemies() {
@@ -5330,18 +5765,25 @@
       const run = this.currentRun;
       run.entities.enemies.forEach((enemy) => {
         if (enemy.dead) return;
-        const sprite = this.getEnemySprite(enemy.typeId);
+        const sprite = this.getEnemySpriteForEntity(enemy);
         if (sprite) {
           const sourceW = Math.max(1, Number(sprite.naturalWidth || 1));
           const sourceH = Math.max(1, Number(sprite.naturalHeight || 1));
           const aspect = sourceW / sourceH;
-          const renderHeight = Math.max(enemy.radius * 2.35, enemy.radius * 2 + 4);
+          const baseRenderHeight = Math.max(enemy.radius * 2.35, enemy.radius * 2 + 4);
+          const spriteScale = enemy.typeId === "shooter" ? 1.5 : 1;
+          const renderHeight = baseRenderHeight * spriteScale;
           const renderWidth = renderHeight * aspect;
-          const left = enemy.x - renderWidth * 0.5;
-          const top = enemy.y + enemy.radius - renderHeight;
+          const player = run.player || null;
+          const faceAngle = player ? Math.atan2(player.y - enemy.y, player.x - enemy.x) : 0;
+          const rotation = faceAngle - ENEMY_TOP_SPRITE_FORWARD_ANGLE;
           const previousSmoothing = ctx.imageSmoothingEnabled;
           ctx.imageSmoothingEnabled = false;
-          ctx.drawImage(sprite, left, top, renderWidth, renderHeight);
+          ctx.save();
+          ctx.translate(enemy.x, enemy.y);
+          ctx.rotate(rotation);
+          ctx.drawImage(sprite, -renderWidth * 0.5, -renderHeight * 0.5, renderWidth, renderHeight);
+          ctx.restore();
           ctx.imageSmoothingEnabled = previousSmoothing;
           this.drawEnemyHealthBar(enemy);
           return;
@@ -5452,6 +5894,25 @@
     drawEnemyProjectiles() {
       const ctx = this.ctx;
       this.currentRun.entities.enemyProjectiles.forEach((projectile) => {
+        const projectileSprite = this.getEnemyProjectileSprite(projectile.sourceTypeId);
+        if (projectileSprite) {
+          const angle = Math.atan2(Number(projectile.vy || 0), Number(projectile.vx || 0));
+          const renderLength = Math.max(12, Number(projectile.radius || 5) * 3.1);
+          const sourceW = Math.max(1, Number(projectileSprite.naturalWidth || 1));
+          const sourceH = Math.max(1, Number(projectileSprite.naturalHeight || 1));
+          const aspect = sourceW / sourceH;
+          const renderHeight = Math.max(4, renderLength / Math.max(0.01, aspect));
+          const previousSmoothing = ctx.imageSmoothingEnabled;
+          ctx.imageSmoothingEnabled = false;
+          ctx.save();
+          ctx.translate(projectile.x, projectile.y);
+          ctx.rotate(angle);
+          ctx.drawImage(projectileSprite, -renderLength * 0.5, -renderHeight * 0.5, renderLength, renderHeight);
+          ctx.restore();
+          ctx.imageSmoothingEnabled = previousSmoothing;
+          return;
+        }
+
         ctx.fillStyle = projectile.radius >= 7 ? "#ff4972" : "#ff9d84";
         ctx.beginPath();
         ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2);

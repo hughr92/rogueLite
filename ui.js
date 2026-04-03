@@ -63,6 +63,57 @@
   }
 
   const UPGRADE_BY_ID = Object.fromEntries(window.RL_DATA.UPGRADES.map((upgrade) => [upgrade.id, upgrade]));
+  const SKILL_ICON_PATH_BY_ID = Object.freeze({
+    ground_slam: "assets/skills/class/barbarian/ground_slam.png",
+    twin_swing: "assets/skills/class/barbarian/twin_swing.png",
+    blood_frenzy: "assets/skills/class/barbarian/blood_frenzy.png",
+    war_cry: "assets/skills/class/barbarian/war_cry.png",
+    berserk: "assets/skills/class/barbarian/berserk.png",
+    generic_damage: "assets/skills/general/damage_increase.png",
+    generic_cooldown: "assets/skills/general/cooldown_reduction.png",
+    damage_increase: "assets/skills/general/damage_increase.png",
+    cooldown_reduction: "assets/skills/general/cooldown_reduction.png",
+    damage_reduction: "assets/skills/general/damage_increase.png",
+    sever_artery: "assets/skills/class/barbarian/sever_artery.jpg",
+    axe_widen_arc: "assets/skills/weapon/axe/cleave.png",
+    axe_twin_swing: "assets/skills/class/barbarian/twin_swing.png",
+    axe_whirlwind: "assets/skills/weapon/axe/whirlwind.png",
+    javelin_volley: "assets/skills/weapon/javelin/volley.jpg",
+    javelin_long_flight: "assets/skills/weapon/javelin/piercing_throw.png",
+    javelin_piercing_volley: "assets/skills/weapon/javelin/explosive_vollery.jpg",
+    twin_slash: "assets/skills/weapon/sword/twin_slash.png",
+    piercing_throw: "assets/skills/weapon/javelin/piercing_throw.png",
+    power_shot: "assets/skills/weapon/bow/power_shot.png",
+    volley: "assets/skills/weapon/bow/volley.png",
+    shield_bash: "assets/skills/weapon/shield/shield_bash.png",
+    fortify: "assets/skills/weapon/shield/fortify.png",
+    cleave: "assets/skills/weapon/axe/cleave.png",
+    whirlwind: "assets/skills/weapon/axe/whirlwind.png"
+  });
+
+  function resolveSkillIconPathById(rawId) {
+    const id = String(rawId || "").trim().toLowerCase();
+    if (!id) return "";
+    const withoutAlt = id.replace(/_alt_\d+$/i, "");
+    if (withoutAlt.startsWith("class_skill_unlock:")) {
+      const skillId = withoutAlt.slice("class_skill_unlock:".length).trim();
+      return SKILL_ICON_PATH_BY_ID[skillId] || "";
+    }
+    return SKILL_ICON_PATH_BY_ID[withoutAlt] || "";
+  }
+
+  function createSkillIcon(path, alt, className) {
+    if (!path) return null;
+    const img = createElement("img", className || "skill-icon");
+    img.src = path;
+    img.alt = alt || "Skill icon";
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.addEventListener("error", () => {
+      img.classList.add("hidden");
+    });
+    return img;
+  }
 
   function createUiController() {
     const dom = {
@@ -114,6 +165,7 @@
       healthHudLabel: byId("healthHudLabel"),
       healthFill: byId("healthFill"),
       healthPotionHudLabel: byId("healthPotionHudLabel"),
+      classSkillHud: byId("classSkillHud"),
       roundTimerHudLabel: byId("roundTimerHudLabel"),
       hudLevel: byId("hudLevel"),
       hudGold: byId("hudGold"),
@@ -161,6 +213,10 @@
       selectedDifficulty: 1
     };
     let inventoryContextMenuEl = null;
+    let skillStripCache = {
+      signature: "",
+      byId: {}
+    };
 
     function closeInventoryContextMenu() {
       if (!inventoryContextMenuEl) return;
@@ -901,9 +957,15 @@
           weapon.paths.forEach((path) => {
             const rank = getProgressRank(path.upgradeId);
             const node = createElement("li", "upgrade-node");
+            const icon = createSkillIcon(
+              resolveSkillIconPathById(path.upgradeId),
+              path.label || path.upgradeId,
+              "skill-inline-icon"
+            );
             const label = createElement("strong", "", `${path.label}: `);
             const desc = createElement("span", "", path.description);
             const level = createElement("span", "upgrade-level", `${rank}/${path.maxLevel}`);
+            if (icon) node.appendChild(icon);
             node.append(label, desc);
             node.appendChild(level);
             upgrades.appendChild(node);
@@ -913,6 +975,11 @@
             const ultimateRank = getProgressRank(weapon.ultimate.upgradeId);
             const unlocked = isUltimateUnlocked(weapon.ultimate.upgradeId);
             const ultimateNode = createElement("li", "upgrade-node ultimate-node");
+            const icon = createSkillIcon(
+              resolveSkillIconPathById(weapon.ultimate.upgradeId),
+              weapon.ultimate.label || weapon.ultimate.upgradeId,
+              "skill-inline-icon"
+            );
             const label = createElement("strong", "", `${weapon.ultimate.label}: `);
             const desc = createElement("span", "", weapon.ultimate.description);
             const status = createElement("span", "ultimate-status");
@@ -928,6 +995,7 @@
               status.textContent = "Locked";
             }
 
+            if (icon) ultimateNode.appendChild(icon);
             ultimateNode.append(label, desc, status);
             if (!unlocked && ultimateRank <= 0 && weapon.ultimate.requirementText) {
               ultimateNode.appendChild(
@@ -1160,6 +1228,14 @@
         }
 
         const header = createElement("div", "class-skill-head");
+        const icon = createSkillIcon(
+          resolveSkillIconPathById(skill.id),
+          skill.name || skill.id,
+          "class-skill-icon"
+        );
+        if (icon) {
+          card.appendChild(icon);
+        }
         header.appendChild(createElement("div", "class-skill-name", skill.name || toTitle(skill.id)));
         header.appendChild(
           createElement(
@@ -2893,6 +2969,82 @@
       setVisible(dom.deleteCharacterOverlay, false);
     }
 
+    function formatClassSkillTypeLabel(typeId) {
+      const normalized = String(typeId || "").trim().toLowerCase();
+      if (normalized === "active") return "Active";
+      if (normalized === "passive_triggered") return "Triggered Passive";
+      if (normalized === "passive") return "Passive";
+      return toTitle(normalized || "skill");
+    }
+
+    function renderClassSkillHud(skills) {
+      if (!dom.classSkillHud) return;
+      const entries = Array.isArray(skills) ? skills.filter((entry) => entry && typeof entry === "object") : [];
+      if (!entries.length) {
+        dom.classSkillHud.innerHTML = "";
+        dom.classSkillHud.classList.add("hidden");
+        skillStripCache.signature = "";
+        skillStripCache.byId = {};
+        return;
+      }
+
+      dom.classSkillHud.classList.remove("hidden");
+      const signature = entries.map((entry) => String(entry.id || "").trim()).join("|");
+      if (skillStripCache.signature !== signature) {
+        dom.classSkillHud.innerHTML = "";
+        skillStripCache.signature = signature;
+        skillStripCache.byId = {};
+
+        const strip = createElement("div", "skill-strip");
+        entries.forEach((entry) => {
+          const skillId = String(entry.id || "").trim();
+          if (!skillId) return;
+          const item = createElement("article", "skill-item");
+          item.dataset.skillId = skillId;
+
+          const background = createElement("div", "skill-background");
+          const iconPath = entry.iconPath || resolveSkillIconPathById(skillId);
+          if (iconPath) {
+            background.style.backgroundImage = `url(\"${iconPath}\")`;
+          }
+
+          const cooldownOverlay = createElement("div", "cooldown-overlay");
+          const skillName = createElement("div", "skill-name", entry.name || toTitle(skillId));
+          const keybind = createElement("div", "keybind-label", entry.keybind || "Passive");
+
+          item.append(background, cooldownOverlay, skillName, keybind);
+          strip.appendChild(item);
+          skillStripCache.byId[skillId] = {
+            item,
+            background,
+            cooldownOverlay,
+            skillName,
+            keybind
+          };
+        });
+
+        dom.classSkillHud.appendChild(strip);
+      }
+
+      entries.forEach((entry) => {
+        const skillId = String(entry.id || "").trim();
+        const refs = skillStripCache.byId[skillId];
+        if (!refs) return;
+        const cooldownDuration = Math.max(0, Number(entry.cooldownDuration || 0));
+        const cooldownRemaining = Math.max(0, Number(entry.cooldownRemaining || 0));
+        const cooldownProgress =
+          cooldownDuration > 0 ? Math.max(0, Math.min(1, cooldownRemaining / cooldownDuration)) : 0;
+
+        refs.skillName.textContent = entry.name || toTitle(skillId);
+        refs.keybind.textContent = entry.keybind || "Passive";
+        refs.item.classList.toggle("skill-item-ready", cooldownProgress <= 0);
+        refs.item.classList.toggle("skill-item-cooldown", cooldownProgress > 0);
+        refs.item.setAttribute("aria-label", `${refs.skillName.textContent} - ${entry.statusText || "Ready"}`);
+        refs.cooldownOverlay.style.height = `${(cooldownProgress * 100).toFixed(2)}%`;
+        refs.cooldownOverlay.style.opacity = cooldownProgress > 0 ? "0.62" : "0";
+      });
+    }
+
     function updateHud(hud) {
       const hpCurrent = Math.max(0, Math.ceil(hud.hp || 0));
       const hpMax = Math.max(1, Math.ceil(hud.maxHp || 0));
@@ -2927,6 +3079,7 @@
       dom.healthFill.style.width = `${(hpProgress * 100).toFixed(2)}%`;
       const xpProgress = Math.max(0, Math.min(1, hud.xpProgress || 0));
       dom.xpFill.style.width = `${(xpProgress * 100).toFixed(2)}%`;
+      renderClassSkillHud(hud.classSkills);
     }
 
     function showLevelUp(options) {
@@ -2934,9 +3087,20 @@
       options.forEach((option) => {
         const button = createElement("button", "upgrade-option");
         button.type = "button";
+        const iconPath =
+          resolveSkillIconPathById(option.skillId || option.upgradeId || option.id) ||
+          resolveSkillIconPathById(option.id);
+        const icon = createSkillIcon(iconPath, option.title || option.id, "upgrade-skill-icon");
+        const head = createElement("div", "upgrade-head");
+        if (icon) {
+          head.appendChild(icon);
+        }
         const name = createElement("div", "upgrade-name", option.title);
         const desc = createElement("div", "upgrade-desc", option.description);
-        button.append(name, desc);
+        const textWrap = createElement("div", "upgrade-copy");
+        textWrap.append(name, desc);
+        head.appendChild(textWrap);
+        button.append(head);
         button.addEventListener("click", () => {
           if (handlers.onChooseUpgrade) handlers.onChooseUpgrade(option.id);
         });

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 64" width="256" height="64">
+  <g>
+    <!-- arrow shaft -->
+    <rect x="32" y="30" width="150" height="4" rx="2" fill="#8b5a2b"/>
+
+    <!-- arrow tip -->
+    <polygon points="182,22 232,32 182,42 194,32" fill="#c9ced6"/>
+    <polygon points="190,26 220,32 190,38 198,32" fill="#eef1f4"/>
+
+    <!-- fletching (feathers) -->
+    <polygon points="20,32 36,20 34,32 36,44" fill="#b24a3c"/>
+    <polygon points="12,32 30,18 28,32 30,46" fill="#d05a49"/>
+
+    <!-- nock -->
+    <rect x="26" y="28" width="6" height="8" rx="1" fill="#5c4028"/>
+  </g>
+</svg>

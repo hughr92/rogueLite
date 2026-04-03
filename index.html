@@ -20,6 +20,18 @@
           <div class="level-selector-title">Difficulty</div>
           <div id="difficultySelector" class="level-selector"></div>
         </div>
+        <div class="audio-settings-block">
+          <div class="level-selector-title">Audio</div>
+          <div class="audio-settings-row">
+            <label for="bgmVolumeInput">Music Volume</label>
+            <input id="bgmVolumeInput" type="range" min="0" max="100" step="1" value="42">
+            <span id="bgmVolumeValue" class="audio-settings-value">42%</span>
+          </div>
+          <label class="audio-mute-toggle">
+            <input id="bgmMuteChk" type="checkbox">
+            Mute Music
+          </label>
+        </div>
         <div class="home-actions">
           <button id="createCharacterBtn" class="btn">Create Character</button>
           <button id="startRunBtn" class="btn btn-primary" disabled>Start Run</button>
@@ -68,6 +80,7 @@
         </div>
         <div id="healthPotionHudLabel" class="health-potion-hud-label">Potions (Q): 0</div>
       </div>
+      <div id="classSkillHud" class="class-skill-hud"></div>
       <div id="hud" class="hud">
         <div class="hud-row">
           <span id="hudName">-</span>
@@ -125,6 +138,14 @@
   <div id="pauseOverlay" class="overlay hidden">
     <div class="overlay-card">
       <h2>Paused</h2>
+      <div class="audio-settings-block pause-audio-settings-block">
+        <div class="level-selector-title">Audio</div>
+        <div class="audio-settings-row">
+          <label for="bgmVolumeInputPause">Music Volume</label>
+          <input id="bgmVolumeInputPause" type="range" min="0" max="100" step="1" value="42">
+          <span id="bgmVolumeValuePause" class="audio-settings-value">42%</span>
+        </div>
+      </div>
       <div class="overlay-actions column">
         <button id="resumeBtn" class="btn btn-primary">Resume</button>
         <button id="restartBtn" class="btn">Restart Run</button>
