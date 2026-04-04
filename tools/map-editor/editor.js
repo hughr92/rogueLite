@@ -1,109 +1,42 @@
+
 (function () {
-  const LOCAL_MAPS_KEY = "rl_map_editor_maps_v1";
-  const LOCAL_LEVEL_SLOTS_KEY = "rl_map_editor_level_slots_v1";
+  const LOCAL_MAPS_KEY = "rl_map_editor_maps_v2";
+  const LOCAL_LEVEL_SLOTS_KEY = "rl_map_editor_level_slots_v2";
   const DEFAULT_MAP_SIZE = { width: 2200, height: 1500 };
+  const HISTORY_LIMIT = 60;
+
   const LEVEL_OPTIONS = Array.from({ length: 10 }, (_, index) => {
     const levelIndex = index + 1;
-    return {
-      id: `level_${levelIndex}`,
-      index: levelIndex,
-      label: `Level ${levelIndex}`
-    };
+    return { id: `level_${levelIndex}`, index: levelIndex, label: `Level ${levelIndex}` };
   });
+  const BUNDLED_LEVEL_TEMPLATE_PATHS = {
+    level_1: "./maps/level_1_v1.json"
+  };
 
   const TERRAIN_TYPES = [
-    { id: "rock", label: "Rock", baseRadius: 24 },
-    { id: "tree", label: "Tree", baseRadius: 22 },
-    { id: "debris", label: "Debris", baseRadius: 20 },
-    { id: "pillar", label: "Pillar", baseRadius: 18 },
-    { id: "stump", label: "Stump", baseRadius: 17 },
-    { id: "crate", label: "Crate", baseRadius: 18 }
+    { id: "ground", label: "Ground", layer: "terrain" },
+    { id: "water", label: "Water", layer: "terrain" },
+    { id: "path", label: "Path", layer: "terrain" },
+    { id: "trees", label: "Trees", layer: "props" },
+    { id: "walls", label: "Walls", layer: "collision" }
   ];
 
   const THEMES = [
-    {
-      id: "forest",
-      label: "Forest",
-      mapFill: "#1c2a23",
-      mapBorder: "#506b59",
-      grid: "rgba(86, 120, 99, 0.24)",
-      terrain: {
-        rock: "#73817f",
-        tree: "#3f8158",
-        debris: "#6e5a47",
-        pillar: "#77828f",
-        stump: "#6d5844",
-        crate: "#8b6b49",
-        default: "#6f7f77"
-      },
-      boundaryFill: "rgba(74, 123, 184, 0.26)",
-      boundaryStroke: "#87b5f0",
-      crossingFill: "#a67b4d",
-      crossingStroke: "#ddc39f"
-    },
-    {
-      id: "desert",
-      label: "Desert",
-      mapFill: "#2f2415",
-      mapBorder: "#8d6d38",
-      grid: "rgba(150, 118, 62, 0.24)",
-      terrain: {
-        rock: "#998666",
-        tree: "#7b6949",
-        debris: "#8a6d3e",
-        pillar: "#b29162",
-        stump: "#7a5c34",
-        crate: "#93693d",
-        default: "#9c835c"
-      },
-      boundaryFill: "rgba(152, 90, 41, 0.26)",
-      boundaryStroke: "#e0a366",
-      crossingFill: "#b9935f",
-      crossingStroke: "#edc58f"
-    },
-    {
-      id: "bone",
-      label: "Bone/Necrotic",
-      mapFill: "#231926",
-      mapBorder: "#725b7b",
-      grid: "rgba(120, 94, 133, 0.24)",
-      terrain: {
-        rock: "#9f89aa",
-        tree: "#7b667f",
-        debris: "#8a728f",
-        pillar: "#beaac9",
-        stump: "#8f7693",
-        crate: "#9d81a0",
-        default: "#9d84a6"
-      },
-      boundaryFill: "rgba(170, 56, 79, 0.24)",
-      boundaryStroke: "#de6f87",
-      crossingFill: "#c8b7d4",
-      crossingStroke: "#efe4f5"
-    },
-    {
-      id: "industrial",
-      label: "Metal/Industrial",
-      mapFill: "#1b242d",
-      mapBorder: "#617b92",
-      grid: "rgba(95, 126, 150, 0.25)",
-      terrain: {
-        rock: "#76889a",
-        tree: "#5e7f93",
-        debris: "#5e6772",
-        pillar: "#8ba2b5",
-        stump: "#677f8f",
-        crate: "#6b7b86",
-        default: "#708799"
-      },
-      boundaryFill: "rgba(44, 124, 156, 0.28)",
-      boundaryStroke: "#75c5e8",
-      crossingFill: "#8ea8be",
-      crossingStroke: "#d8e8f2"
-    }
+    { id: "forest", label: "Forest", mapFill: "#1c2a23", mapBorder: "#506b59", grid: "rgba(86, 120, 99, 0.24)", palette: { ground: "#2c4737", water: "#2c6c8f", path: "#7d6a48", trees: "#3b7f55", walls: "#6a7b6d" }, transition: { waterEdge: "rgba(165, 223, 255, 0.65)", pathEdge: "rgba(196, 166, 122, 0.58)" } },
+    { id: "desert", label: "Desert", mapFill: "#2f2415", mapBorder: "#8d6d38", grid: "rgba(150, 118, 62, 0.24)", palette: { ground: "#8b6e3f", water: "#5f8aa3", path: "#b59662", trees: "#9a7f4a", walls: "#b39058" }, transition: { waterEdge: "rgba(186, 221, 245, 0.58)", pathEdge: "rgba(236, 202, 148, 0.56)" } },
+    { id: "snow", label: "Snow", mapFill: "#1d2533", mapBorder: "#7f9dc0", grid: "rgba(155, 186, 220, 0.26)", palette: { ground: "#6e87a5", water: "#5a8ca9", path: "#9ea8b7", trees: "#7ba4bc", walls: "#8ca4bc" }, transition: { waterEdge: "rgba(220, 244, 255, 0.66)", pathEdge: "rgba(228, 233, 243, 0.55)" } },
+    { id: "necrotic", label: "Necrotic", mapFill: "#221a27", mapBorder: "#725b7b", grid: "rgba(120, 94, 133, 0.24)", palette: { ground: "#4f3f58", water: "#5a4c7c", path: "#7a668a", trees: "#695874", walls: "#8f7b99" }, transition: { waterEdge: "rgba(221, 190, 255, 0.52)", pathEdge: "rgba(205, 183, 219, 0.52)" } }
   ];
 
-  const CROSSING_TYPES = [{ id: "bridge", label: "Bridge" }];
+  const TOOL_LABELS = {
+    select: "Select",
+    paint: "Paint",
+    river: "River/Path",
+    play_area: "Play Area",
+    play_area_rect: "Play Area Rect",
+    player_start: "Player Start",
+    eraser: "Eraser"
+  };
 
   const dom = {
     canvas: document.getElementById("mapCanvas"),
@@ -111,8 +44,33 @@
     terrainTypeSelect: document.getElementById("terrainTypeSelect"),
     themePreviewSelect: document.getElementById("themePreviewSelect"),
     gridVisibleChk: document.getElementById("gridVisibleChk"),
-    snapEnabledChk: document.getElementById("snapEnabledChk"),
     gridSizeInput: document.getElementById("gridSizeInput"),
+    layerBackgroundChk: document.getElementById("layerBackgroundChk"),
+    layerTerrainChk: document.getElementById("layerTerrainChk"),
+    layerPropsChk: document.getElementById("layerPropsChk"),
+    layerPlayAreaChk: document.getElementById("layerPlayAreaChk"),
+    layerCollisionChk: document.getElementById("layerCollisionChk"),
+    brushSizeInput: document.getElementById("brushSizeInput"),
+    brushDensityInput: document.getElementById("brushDensityInput"),
+    brushRandomnessInput: document.getElementById("brushRandomnessInput"),
+    brushSoftnessInput: document.getElementById("brushSoftnessInput"),
+    brushSizeLabel: document.getElementById("brushSizeLabel"),
+    brushDensityLabel: document.getElementById("brushDensityLabel"),
+    brushRandomnessLabel: document.getElementById("brushRandomnessLabel"),
+    brushSoftnessLabel: document.getElementById("brushSoftnessLabel"),
+    importBackgroundBtn: document.getElementById("importBackgroundBtn"),
+    importBackgroundInput: document.getElementById("importBackgroundInput"),
+    clearBackgroundBtn: document.getElementById("clearBackgroundBtn"),
+    backgroundOpacityInput: document.getElementById("backgroundOpacityInput"),
+    backgroundScaleInput: document.getElementById("backgroundScaleInput"),
+    backgroundOffsetXInput: document.getElementById("backgroundOffsetXInput"),
+    backgroundOffsetYInput: document.getElementById("backgroundOffsetYInput"),
+    backgroundOpacityLabel: document.getElementById("backgroundOpacityLabel"),
+    backgroundScaleLabel: document.getElementById("backgroundScaleLabel"),
+    clearPlayAreaBtn: document.getElementById("clearPlayAreaBtn"),
+    playAreaSummary: document.getElementById("playAreaSummary"),
+    playerStartSummary: document.getElementById("playerStartSummary"),
+    resetPlayerStartBtn: document.getElementById("resetPlayerStartBtn"),
     mapIdInput: document.getElementById("mapIdInput"),
     mapNameInput: document.getElementById("mapNameInput"),
     mapWidthInput: document.getElementById("mapWidthInput"),
@@ -124,6 +82,8 @@
     zoomLabel: document.getElementById("zoomLabel"),
     statusText: document.getElementById("statusText"),
     validationText: document.getElementById("validationText"),
+    undoBtn: document.getElementById("undoBtn"),
+    redoBtn: document.getElementById("redoBtn"),
     newMapBtn: document.getElementById("newMapBtn"),
     openFileBtn: document.getElementById("openFileBtn"),
     openFileInput: document.getElementById("openFileInput"),
@@ -140,64 +100,65 @@
 
   const state = {
     activeLevelId: LEVEL_OPTIONS[0].id,
-    map: createDefaultMap(LEVEL_OPTIONS[0].id),
+    map: null,
     tool: "select",
-    selected: null,
-    boundaryDraft: [],
+    selectedTerrainId: null,
     camera: { x: DEFAULT_MAP_SIZE.width * 0.5, y: DEFAULT_MAP_SIZE.height * 0.5, zoom: 0.45 },
-    grid: { visible: true, snap: false, size: 32 },
-    drag: null,
-    keyboard: { space: false, ctrl: false },
+    keyboard: { space: false },
     hoverWorld: { x: 0, y: 0 },
+    needsRender: true,
+    drag: null,
+    stroke: null,
+    history: { undo: [], redo: [] },
+    grid: { visible: true, size: 32 },
+    brush: { size: 3, density: 0.6, randomness: 0.35, softness: 0.7 },
+    layerVisibility: { background: true, terrain: true, props: true, playArea: true, collision: true },
     terrainPlacementType: TERRAIN_TYPES[0].id,
-    crossingPlacementType: CROSSING_TYPES[0].id,
     themePreviewId: THEMES[0].id,
-    needsRender: true
+    assetCache: Object.create(null)
   };
 
-  function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
-  }
-
-  function nextId(prefix) {
-    return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
-  }
-
-  function getLevelOption(levelId) {
-    return LEVEL_OPTIONS.find((level) => level.id === levelId) || LEVEL_OPTIONS[0];
+  function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+  function nextId(prefix) { return `${prefix}_${Math.random().toString(36).slice(2, 10)}`; }
+  function deepClone(value) { return JSON.parse(JSON.stringify(value)); }
+  function randRange(min, max) { return min + Math.random() * (max - min); }
+  function getLevelOption(levelId) { return LEVEL_OPTIONS.find((level) => level.id === levelId) || LEVEL_OPTIONS[0]; }
+  function getTheme(themeId) { return THEMES.find((theme) => theme.id === themeId) || THEMES[0]; }
+  function getTerrainType(terrainId) { return TERRAIN_TYPES.find((entry) => entry.id === terrainId) || TERRAIN_TYPES[0]; }
+  function getTerrainLayer(terrainId) { return getTerrainType(terrainId).layer; }
+  function getGridSize() { return Math.max(8, Number(state.grid.size || 32)); }
+  function createDefaultBackgroundImage() { return { src: "", opacity: 0.5, scale: 1, offsetX: 0, offsetY: 0 }; }
+  function createDefaultPlayerStart(mapWidth, mapHeight) {
+    return {
+      x: Math.max(0, Number(mapWidth || DEFAULT_MAP_SIZE.width)) * 0.5,
+      y: Math.max(0, Number(mapHeight || DEFAULT_MAP_SIZE.height)) * 0.5
+    };
   }
 
   function createDefaultMap(levelId) {
     const level = getLevelOption(levelId);
+    const themeId = THEMES[0].id;
     return {
       id: `${level.id}_layout`,
       levelId: level.id,
       name: `${level.label} Layout`,
       width: DEFAULT_MAP_SIZE.width,
       height: DEFAULT_MAP_SIZE.height,
-      defaultThemeId: THEMES[0].id,
-      terrainObjects: [],
+      theme: themeId,
+      defaultThemeId: themeId,
+      terrain: [],
+      props: [],
+      playAreaMask: [],
+      backgroundImage: null,
+      playerStart: createDefaultPlayerStart(DEFAULT_MAP_SIZE.width, DEFAULT_MAP_SIZE.height),
       boundaries: [],
       crossings: []
     };
   }
 
-  function getTheme(themeId) {
-    return THEMES.find((theme) => theme.id === themeId) || THEMES[0];
-  }
-
-  function getTerrainType(typeId) {
-    return TERRAIN_TYPES.find((item) => item.id === typeId) || TERRAIN_TYPES[0];
-  }
-
-  function deepClone(value) {
-    return JSON.parse(JSON.stringify(value));
-  }
-
   function setStatus(message, severity) {
     dom.statusText.textContent = message;
-    dom.statusText.style.color =
-      severity === "error" ? "#ffd0d7" : severity === "success" ? "#c9f5d7" : "#d7e3fb";
+    dom.statusText.style.color = severity === "error" ? "#ffd0d7" : severity === "success" ? "#c9f5d7" : "#d7e3fb";
   }
 
   function setValidationSummary(errors, warnings) {
@@ -212,576 +173,413 @@
     dom.validationText.style.color = errorCount ? "#ffd0d7" : "#ffe7b8";
   }
 
-  function snapValue(value) {
-    if (!state.grid.snap) return value;
-    const grid = Math.max(8, Number(state.grid.size || 32));
-    return Math.round(value / grid) * grid;
-  }
+  function requestRender() { state.needsRender = true; }
+  function getCanvasPointFromEvent(event) { const rect = dom.canvas.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; }
 
   function worldToScreen(point) {
-    const canvasWidth = dom.canvas.width;
-    const canvasHeight = dom.canvas.height;
-    return {
-      x: (point.x - state.camera.x) * state.camera.zoom + canvasWidth * 0.5,
-      y: (point.y - state.camera.y) * state.camera.zoom + canvasHeight * 0.5
-    };
+    const cw = dom.canvas.width;
+    const ch = dom.canvas.height;
+    return { x: (point.x - state.camera.x) * state.camera.zoom + cw * 0.5, y: (point.y - state.camera.y) * state.camera.zoom + ch * 0.5 };
   }
 
   function screenToWorld(point) {
-    const canvasWidth = dom.canvas.width;
-    const canvasHeight = dom.canvas.height;
-    return {
-      x: (point.x - canvasWidth * 0.5) / state.camera.zoom + state.camera.x,
-      y: (point.y - canvasHeight * 0.5) / state.camera.zoom + state.camera.y
-    };
+    const cw = dom.canvas.width;
+    const ch = dom.canvas.height;
+    return { x: (point.x - cw * 0.5) / state.camera.zoom + state.camera.x, y: (point.y - ch * 0.5) / state.camera.zoom + state.camera.y };
   }
 
-  function getCanvasPointFromEvent(event) {
-    const rect = dom.canvas.getBoundingClientRect();
-    return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top
-    };
+  function clampPointToMap(point) { return { x: clamp(point.x, 0, state.map.width), y: clamp(point.y, 0, state.map.height) }; }
+  function pointInsideMap(point) { return point.x >= 0 && point.y >= 0 && point.x <= state.map.width && point.y <= state.map.height; }
+  function worldToGrid(point) { const grid = getGridSize(); return { gx: Math.floor(point.x / grid), gy: Math.floor(point.y / grid) }; }
+  function gridToWorld(gx, gy) { const grid = getGridSize(); return { x: (gx + 0.5) * grid, y: (gy + 0.5) * grid }; }
+  function terrainKey(gx, gy) { return `${gx}:${gy}`; }
+  function playAreaKey(gx, gy) { return `${gx}:${gy}`; }
+
+  function makeTerrainStamp(gx, gy, terrainType, options) {
+    const grid = getGridSize();
+    const world = gridToWorld(gx, gy);
+    const randomness = Math.max(0, Number((options && options.randomness) || state.brush.randomness || 0));
+    const jitterMax = grid * 0.18 * randomness;
+    return { id: nextId("cell"), key: terrainKey(gx, gy), gx, gy, x: world.x, y: world.y, terrainType, layer: getTerrainLayer(terrainType), variantIndex: Math.floor(Math.random() * 4), rotationDeg: randRange(-10, 10), scale: clamp(randRange(0.92, 1.08), 0.75, 1.25), jitterX: randRange(-jitterMax, jitterMax), jitterY: randRange(-jitterMax, jitterMax) };
   }
 
-  function pointInsideMap(point) {
-    return point.x >= 0 && point.y >= 0 && point.x <= state.map.width && point.y <= state.map.height;
+  function normalizeTerrainStamp(rawStamp, mapWidth, mapHeight) {
+    const stamp = rawStamp && typeof rawStamp === "object" ? rawStamp : {};
+    const terrainType = TERRAIN_TYPES.some((entry) => entry.id === stamp.terrainType) ? stamp.terrainType : TERRAIN_TYPES.some((entry) => entry.id === stamp.type) ? stamp.type : TERRAIN_TYPES[0].id;
+    const grid = getGridSize();
+    const gx = Number.isFinite(Number(stamp.gx)) ? Math.floor(Number(stamp.gx)) : Number.isFinite(Number(stamp.x)) ? Math.floor(Number(stamp.x) / grid) : 0;
+    const gy = Number.isFinite(Number(stamp.gy)) ? Math.floor(Number(stamp.gy)) : Number.isFinite(Number(stamp.y)) ? Math.floor(Number(stamp.y) / grid) : 0;
+    const world = gridToWorld(gx, gy);
+    return { id: String(stamp.id || nextId("cell")).trim() || nextId("cell"), key: terrainKey(gx, gy), gx, gy, x: clamp(Number.isFinite(Number(stamp.x)) ? Number(stamp.x) : world.x, 0, mapWidth), y: clamp(Number.isFinite(Number(stamp.y)) ? Number(stamp.y) : world.y, 0, mapHeight), terrainType, layer: getTerrainLayer(terrainType), variantIndex: Math.max(0, Math.floor(Number(stamp.variantIndex || 0))) % 4, rotationDeg: clamp(Number(stamp.rotationDeg || stamp.rotation || 0), -45, 45), scale: clamp(Number(stamp.scale || 1), 0.6, 1.6), jitterX: clamp(Number(stamp.jitterX || 0), -grid * 0.4, grid * 0.4), jitterY: clamp(Number(stamp.jitterY || 0), -grid * 0.4, grid * 0.4) };
   }
 
-  function clampPointToMap(point) {
-    return {
-      x: clamp(point.x, 0, state.map.width),
-      y: clamp(point.y, 0, state.map.height)
-    };
-  }
-
-  function pointInPolygon(point, polygon) {
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      const xi = polygon[i].x;
-      const yi = polygon[i].y;
-      const xj = polygon[j].x;
-      const yj = polygon[j].y;
-      const intersects =
-        yi > point.y !== yj > point.y && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi + 0.000001) + xi;
-      if (intersects) inside = !inside;
-    }
-    return inside;
-  }
-
-  function distancePointToSegment(point, a, b) {
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const lengthSq = dx * dx + dy * dy;
-    if (lengthSq <= 0.0001) {
-      return Math.hypot(point.x - a.x, point.y - a.y);
-    }
-    const t = clamp(((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq, 0, 1);
-    const projX = a.x + dx * t;
-    const projY = a.y + dy * t;
-    return Math.hypot(point.x - projX, point.y - projY);
-  }
-
-  function getCrossingBoundaryDistance(crossing) {
-    let nearest = Number.POSITIVE_INFINITY;
-    state.map.boundaries.forEach((boundary) => {
-      const points = boundary.polygonPoints || [];
-      for (let i = 0; i < points.length; i += 1) {
-        const a = points[i];
-        const b = points[(i + 1) % points.length];
-        nearest = Math.min(nearest, distancePointToSegment(crossing, a, b));
-      }
+  function normalizePlayAreaMask(rawMask, mapWidth, mapHeight) {
+    const source = Array.isArray(rawMask) ? rawMask : [];
+    const grid = getGridSize();
+    const seen = Object.create(null);
+    const normalized = [];
+    source.forEach((entry) => {
+      if (!entry || typeof entry !== "object") return;
+      const gx = Number.isFinite(Number(entry.gx)) ? Math.floor(Number(entry.gx)) : Number.isFinite(Number(entry.x)) ? Math.floor(Number(entry.x) / grid) : null;
+      const gy = Number.isFinite(Number(entry.gy)) ? Math.floor(Number(entry.gy)) : Number.isFinite(Number(entry.y)) ? Math.floor(Number(entry.y) / grid) : null;
+      if (!Number.isFinite(gx) || !Number.isFinite(gy)) return;
+      const center = gridToWorld(gx, gy);
+      if (center.x < 0 || center.y < 0 || center.x > mapWidth || center.y > mapHeight) return;
+      const key = playAreaKey(gx, gy);
+      if (seen[key]) return;
+      seen[key] = true;
+      normalized.push({ gx, gy });
     });
-    return nearest;
+    return normalized;
   }
 
-  function isCrossingPlacementValid(crossing) {
-    if (!state.map.boundaries.length) return false;
-    const nearest = getCrossingBoundaryDistance(crossing);
-    return nearest <= Math.max(22, Number(crossing.width || 70) * 0.75);
+  function normalizeBackgroundImage(rawBackground) {
+    if (!rawBackground || typeof rawBackground !== "object") return null;
+    const src = String(rawBackground.src || "").trim();
+    if (!src) return null;
+    return { src, opacity: clamp(Number(rawBackground.opacity || 0.5), 0, 1), scale: clamp(Number(rawBackground.scale || 1), 0.2, 3), offsetX: Number(rawBackground.offsetX || 0), offsetY: Number(rawBackground.offsetY || 0) };
   }
 
-  function toJsonMap() {
-    return deepClone({
-      id: state.map.id,
-      levelId: state.activeLevelId,
-      name: state.map.name,
-      width: state.map.width,
-      height: state.map.height,
-      defaultThemeId: state.map.defaultThemeId,
-      terrainObjects: state.map.terrainObjects,
-      boundaries: state.map.boundaries,
-      crossings: state.map.crossings
-    });
-  }
-
-  function normalizePoint(rawPoint) {
-    const x = Number(rawPoint && rawPoint.x);
-    const y = Number(rawPoint && rawPoint.y);
+  function normalizePlayerStart(rawPlayerStart, mapWidth, mapHeight) {
+    const fallback = createDefaultPlayerStart(mapWidth, mapHeight);
+    if (!rawPlayerStart || typeof rawPlayerStart !== "object" || Array.isArray(rawPlayerStart)) return fallback;
+    const parsedX = Number(rawPlayerStart.x);
+    const parsedY = Number(rawPlayerStart.y);
     return {
-      x: Number.isFinite(x) ? x : 0,
-      y: Number.isFinite(y) ? y : 0
+      x: Number.isFinite(parsedX) ? clamp(parsedX, 0, mapWidth) : fallback.x,
+      y: Number.isFinite(parsedY) ? clamp(parsedY, 0, mapHeight) : fallback.y
     };
   }
 
   function normalizeMapData(rawMap) {
     const source = rawMap && typeof rawMap === "object" ? rawMap : {};
-    const parsedLevelId = LEVEL_OPTIONS.some((level) => level.id === source.levelId)
-      ? String(source.levelId)
-      : state.activeLevelId;
+    const parsedLevelId = LEVEL_OPTIONS.some((level) => level.id === source.levelId) ? String(source.levelId) : state.activeLevelId;
     const width = Math.max(200, Number(source.width || DEFAULT_MAP_SIZE.width));
     const height = Math.max(200, Number(source.height || DEFAULT_MAP_SIZE.height));
+    const theme = THEMES.some((entry) => entry.id === source.theme) ? source.theme : THEMES.some((entry) => entry.id === source.defaultThemeId) ? source.defaultThemeId : THEMES[0].id;
     const normalized = {
       id: String(source.id || nextId("map")).trim() || nextId("map"),
       levelId: parsedLevelId,
       name: String(source.name || "Imported Map").trim() || "Imported Map",
       width,
       height,
-      defaultThemeId: THEMES.some((theme) => theme.id === source.defaultThemeId) ? source.defaultThemeId : THEMES[0].id,
-      terrainObjects: [],
-      boundaries: [],
-      crossings: []
+      theme,
+      defaultThemeId: theme,
+      terrain: [],
+      props: Array.isArray(source.props) ? deepClone(source.props) : [],
+      playAreaMask: normalizePlayAreaMask(source.playAreaMask, width, height),
+      backgroundImage: normalizeBackgroundImage(source.backgroundImage),
+      playerStart: normalizePlayerStart(source.playerStart, width, height),
+      boundaries: Array.isArray(source.boundaries) ? deepClone(source.boundaries) : [],
+      crossings: Array.isArray(source.crossings) ? deepClone(source.crossings) : []
     };
-
-    const terrainObjects = Array.isArray(source.terrainObjects) ? source.terrainObjects : [];
-    terrainObjects.forEach((terrain, index) => {
-      const parsed = {
-        id: String((terrain && terrain.id) || nextId("terrain")).trim() || `terrain_${index + 1}`,
-        type: TERRAIN_TYPES.some((item) => item.id === terrain.type) ? terrain.type : TERRAIN_TYPES[0].id,
-        x: Number(terrain && terrain.x),
-        y: Number(terrain && terrain.y),
-        rotation: Number(terrain && terrain.rotation) || 0,
-        scale: clamp(Number(terrain && terrain.scale) || 1, 0.2, 4)
-      };
-      parsed.x = clamp(Number.isFinite(parsed.x) ? parsed.x : width * 0.5, 0, width);
-      parsed.y = clamp(Number.isFinite(parsed.y) ? parsed.y : height * 0.5, 0, height);
-      normalized.terrainObjects.push(parsed);
-    });
-
-    const boundaries = Array.isArray(source.boundaries) ? source.boundaries : [];
-    boundaries.forEach((boundary, index) => {
-      const points = Array.isArray(boundary && boundary.polygonPoints)
-        ? boundary.polygonPoints.map(normalizePoint).map((point) => ({
-            x: clamp(point.x, 0, width),
-            y: clamp(point.y, 0, height)
-          }))
-        : [];
-      if (points.length < 3) return;
-      normalized.boundaries.push({
-        id: String((boundary && boundary.id) || nextId("boundary")).trim() || `boundary_${index + 1}`,
-        polygonPoints: points,
-        blocksPlayer: boundary && boundary.blocksPlayer !== false,
-        blocksEnemies: boundary && boundary.blocksEnemies !== false
-      });
-    });
-
-    const crossings = Array.isArray(source.crossings) ? source.crossings : [];
-    crossings.forEach((crossing, index) => {
-      const parsed = {
-        id: String((crossing && crossing.id) || nextId("crossing")).trim() || `crossing_${index + 1}`,
-        type: CROSSING_TYPES.some((item) => item.id === crossing.type) ? crossing.type : CROSSING_TYPES[0].id,
-        x: Number(crossing && crossing.x),
-        y: Number(crossing && crossing.y),
-        orientation: Number(crossing && crossing.orientation) || 0,
-        width: clamp(Number(crossing && crossing.width) || 78, 24, 420),
-        length: clamp(Number(crossing && crossing.length) || 30, 10, 260)
-      };
-      parsed.x = clamp(Number.isFinite(parsed.x) ? parsed.x : width * 0.5, 0, width);
-      parsed.y = clamp(Number.isFinite(parsed.y) ? parsed.y : height * 0.5, 0, height);
-      normalized.crossings.push(parsed);
-    });
-
+    const terrainSource = Array.isArray(source.terrain) ? source.terrain : Array.isArray(source.terrainObjects) ? source.terrainObjects.map((entry) => ({ terrainType: TERRAIN_TYPES.some((type) => type.id === entry.type) ? entry.type : "trees", x: entry.x, y: entry.y, rotationDeg: entry.rotation, scale: entry.scale })) : [];
+    const deduped = Object.create(null);
+    terrainSource.forEach((entry) => { const stamp = normalizeTerrainStamp(entry, width, height); deduped[stamp.key] = stamp; });
+    normalized.terrain = Object.values(deduped);
     return normalized;
   }
 
-  function findTerrainHit(worldPoint) {
-    for (let i = state.map.terrainObjects.length - 1; i >= 0; i -= 1) {
-      const terrain = state.map.terrainObjects[i];
-      const baseRadius = getTerrainType(terrain.type).baseRadius;
-      const radius = baseRadius * (terrain.scale || 1);
-      if (Math.hypot(worldPoint.x - terrain.x, worldPoint.y - terrain.y) <= radius + 4 / state.camera.zoom) {
-        return { kind: "terrain", id: terrain.id };
-      }
-    }
-    return null;
+  function toJsonMap() {
+    const terrain = deepClone(state.map.terrain).map((stamp) => ({ id: stamp.id, key: stamp.key, gx: stamp.gx, gy: stamp.gy, x: stamp.x, y: stamp.y, terrainType: stamp.terrainType, layer: stamp.layer, variantIndex: stamp.variantIndex, rotationDeg: stamp.rotationDeg, scale: stamp.scale, jitterX: stamp.jitterX, jitterY: stamp.jitterY }));
+    const terrainObjects = terrain.map((stamp) => ({ id: stamp.id, type: stamp.terrainType, x: stamp.x, y: stamp.y, rotation: stamp.rotationDeg, scale: stamp.scale }));
+    const props = terrain.filter((stamp) => stamp.layer === "props").map((stamp) => ({ id: stamp.id, type: stamp.terrainType, x: stamp.x, y: stamp.y, rotation: stamp.rotationDeg, scale: stamp.scale }));
+    return {
+      id: state.map.id,
+      levelId: state.activeLevelId,
+      name: state.map.name,
+      width: state.map.width,
+      height: state.map.height,
+      theme: state.map.theme,
+      defaultThemeId: state.map.theme,
+      terrain,
+      props,
+      playAreaMask: deepClone(state.map.playAreaMask),
+      backgroundImage: state.map.backgroundImage ? deepClone(state.map.backgroundImage) : null,
+      playerStart: state.map.playerStart ? deepClone(state.map.playerStart) : null,
+      terrainObjects,
+      boundaries: Array.isArray(state.map.boundaries) ? deepClone(state.map.boundaries) : [],
+      crossings: Array.isArray(state.map.crossings) ? deepClone(state.map.crossings) : []
+    };
   }
 
-  function findCrossingHit(worldPoint) {
-    for (let i = state.map.crossings.length - 1; i >= 0; i -= 1) {
-      const crossing = state.map.crossings[i];
-      const angle = (Number(crossing.orientation || 0) * Math.PI) / 180;
-      const dx = worldPoint.x - crossing.x;
-      const dy = worldPoint.y - crossing.y;
-      const localX = dx * Math.cos(-angle) - dy * Math.sin(-angle);
-      const localY = dx * Math.sin(-angle) + dy * Math.cos(-angle);
-      const halfW = Number(crossing.width || 70) * 0.5;
-      const halfH = Number(crossing.length || 30) * 0.5;
-      if (Math.abs(localX) <= halfW && Math.abs(localY) <= halfH) {
-        return { kind: "crossing", id: crossing.id };
-      }
-    }
-    return null;
+  function pushHistory(label) {
+    state.history.undo.push({ label: label || "Edit", map: deepClone(state.map), selectedTerrainId: state.selectedTerrainId });
+    if (state.history.undo.length > HISTORY_LIMIT) state.history.undo.shift();
+    state.history.redo = [];
+    dom.undoBtn.disabled = state.history.undo.length === 0;
+    dom.redoBtn.disabled = state.history.redo.length === 0;
   }
 
-  function findBoundaryVertexHit(worldPoint) {
-    const threshold = 11 / state.camera.zoom;
-    for (let i = state.map.boundaries.length - 1; i >= 0; i -= 1) {
-      const boundary = state.map.boundaries[i];
-      const points = boundary.polygonPoints || [];
-      for (let j = points.length - 1; j >= 0; j -= 1) {
-        const point = points[j];
-        if (Math.hypot(worldPoint.x - point.x, worldPoint.y - point.y) <= threshold) {
-          return { kind: "boundary", id: boundary.id, vertexIndex: j };
+  function restoreSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return;
+    state.map = normalizeMapData(snapshot.map);
+    state.selectedTerrainId = snapshot.selectedTerrainId || null;
+    state.activeLevelId = state.map.levelId;
+    state.themePreviewId = state.map.theme;
+    syncMapInputs();
+    syncBackgroundControls();
+    renderSelectionProperties();
+    updatePlayAreaSummary();
+    requestRender();
+  }
+
+  function undo() {
+    if (!state.history.undo.length) return;
+    state.history.redo.push({ label: "Redo", map: deepClone(state.map), selectedTerrainId: state.selectedTerrainId });
+    const snapshot = state.history.undo.pop();
+    restoreSnapshot(snapshot);
+    dom.undoBtn.disabled = state.history.undo.length === 0;
+    dom.redoBtn.disabled = state.history.redo.length === 0;
+    setStatus(`Undo: ${snapshot.label}.`, "success");
+  }
+
+  function redo() {
+    if (!state.history.redo.length) return;
+    state.history.undo.push({ label: "Undo", map: deepClone(state.map), selectedTerrainId: state.selectedTerrainId });
+    const snapshot = state.history.redo.pop();
+    restoreSnapshot(snapshot);
+    dom.undoBtn.disabled = state.history.undo.length === 0;
+    dom.redoBtn.disabled = state.history.redo.length === 0;
+    setStatus("Redo applied.", "success");
+  }
+
+  function findTerrainStampById(stampId) { return state.map.terrain.find((entry) => entry.id === stampId) || null; }
+  function findTerrainStampByGrid(gx, gy) { return state.map.terrain.find((entry) => entry.key === terrainKey(gx, gy)) || null; }
+
+  function setTerrainCell(gx, gy, terrainType, options) {
+    const center = gridToWorld(gx, gy);
+    if (center.x < 0 || center.y < 0 || center.x > state.map.width || center.y > state.map.height) return false;
+    const existing = findTerrainStampByGrid(gx, gy);
+    if (existing) {
+      existing.terrainType = terrainType;
+      existing.layer = getTerrainLayer(terrainType);
+      existing.variantIndex = Math.floor(Math.random() * 4);
+      existing.rotationDeg = randRange(-10, 10);
+      existing.scale = clamp(randRange(0.92, 1.08), 0.75, 1.25);
+      const grid = getGridSize();
+      const randomness = Math.max(0, Number((options && options.randomness) || state.brush.randomness || 0));
+      const jitterMax = grid * 0.18 * randomness;
+      existing.jitterX = randRange(-jitterMax, jitterMax);
+      existing.jitterY = randRange(-jitterMax, jitterMax);
+      return true;
+    }
+    state.map.terrain.push(makeTerrainStamp(gx, gy, terrainType, options));
+    return true;
+  }
+
+  function removeTerrainCell(gx, gy) {
+    const key = terrainKey(gx, gy);
+    const before = state.map.terrain.length;
+    state.map.terrain = state.map.terrain.filter((entry) => entry.key !== key);
+    if (state.selectedTerrainId && !findTerrainStampById(state.selectedTerrainId)) {
+      state.selectedTerrainId = null;
+      renderSelectionProperties();
+    }
+    return state.map.terrain.length < before;
+  }
+
+  function hasPlayAreaCell(gx, gy) { return state.map.playAreaMask.some((entry) => playAreaKey(entry.gx, entry.gy) === playAreaKey(gx, gy)); }
+
+  function addPlayAreaCell(gx, gy) {
+    const center = gridToWorld(gx, gy);
+    if (center.x < 0 || center.y < 0 || center.x > state.map.width || center.y > state.map.height) return false;
+    if (hasPlayAreaCell(gx, gy)) return false;
+    state.map.playAreaMask.push({ gx, gy });
+    return true;
+  }
+
+  function removePlayAreaCell(gx, gy) {
+    const key = playAreaKey(gx, gy);
+    const before = state.map.playAreaMask.length;
+    state.map.playAreaMask = state.map.playAreaMask.filter((entry) => playAreaKey(entry.gx, entry.gy) !== key);
+    return state.map.playAreaMask.length < before;
+  }
+
+  function smoothTerrainCells(changedCells, terrainType) {
+    if (!changedCells || !changedCells.size) return;
+    if (!["ground", "water", "path"].includes(terrainType)) return;
+    const around = [];
+    changedCells.forEach((key) => {
+      const [gxRaw, gyRaw] = key.split(":");
+      const gx = Number(gxRaw);
+      const gy = Number(gyRaw);
+      if (!Number.isFinite(gx) || !Number.isFinite(gy)) return;
+      for (let oy = -1; oy <= 1; oy += 1) for (let ox = -1; ox <= 1; ox += 1) around.push({ gx: gx + ox, gy: gy + oy });
+    });
+    around.forEach((cell) => {
+      const neighbors = [{ gx: cell.gx + 1, gy: cell.gy }, { gx: cell.gx - 1, gy: cell.gy }, { gx: cell.gx, gy: cell.gy + 1 }, { gx: cell.gx, gy: cell.gy - 1 }, { gx: cell.gx + 1, gy: cell.gy + 1 }, { gx: cell.gx + 1, gy: cell.gy - 1 }, { gx: cell.gx - 1, gy: cell.gy + 1 }, { gx: cell.gx - 1, gy: cell.gy - 1 }];
+      let sameCount = 0;
+      neighbors.forEach((neighbor) => {
+        const existing = findTerrainStampByGrid(neighbor.gx, neighbor.gy);
+        if (existing && existing.terrainType === terrainType) sameCount += 1;
+      });
+      const existing = findTerrainStampByGrid(cell.gx, cell.gy);
+      if (!existing && sameCount >= 6) setTerrainCell(cell.gx, cell.gy, terrainType, { randomness: 0.2 });
+    });
+  }
+
+  function getBrushRadiusWorld() { const grid = getGridSize(); return Math.max(grid * 0.5, Number(state.brush.size) * grid * 0.5); }
+
+  function getMaxGridIndexForMap() {
+    const grid = getGridSize();
+    return {
+      maxGx: Math.max(0, Math.floor((state.map.width - 0.001) / grid)),
+      maxGy: Math.max(0, Math.floor((state.map.height - 0.001) / grid))
+    };
+  }
+
+  function getGridRectFromWorldPoints(pointA, pointB) {
+    const a = clampPointToMap(pointA);
+    const b = clampPointToMap(pointB);
+    const ga = worldToGrid(a);
+    const gb = worldToGrid(b);
+    const limits = getMaxGridIndexForMap();
+    const minGx = clamp(Math.min(ga.gx, gb.gx), 0, limits.maxGx);
+    const minGy = clamp(Math.min(ga.gy, gb.gy), 0, limits.maxGy);
+    const maxGx = clamp(Math.max(ga.gx, gb.gx), 0, limits.maxGx);
+    const maxGy = clamp(Math.max(ga.gy, gb.gy), 0, limits.maxGy);
+    return { minGx, minGy, maxGx, maxGy };
+  }
+
+  function applyPlayAreaRectangle(fromPoint, toPoint, mode) {
+    const rect = getGridRectFromWorldPoints(fromPoint, toPoint);
+    const modeValue = String(mode || "play_rect_set");
+    let changedCount = 0;
+
+    if (modeValue === "play_rect_set") {
+      const existing = Array.isArray(state.map.playAreaMask) ? state.map.playAreaMask.length : 0;
+      if (existing) {
+        state.map.playAreaMask = [];
+        changedCount += existing;
+      }
+      for (let gy = rect.minGy; gy <= rect.maxGy; gy += 1) {
+        for (let gx = rect.minGx; gx <= rect.maxGx; gx += 1) {
+          if (addPlayAreaCell(gx, gy)) changedCount += 1;
+        }
+      }
+    } else if (modeValue === "play_rect_remove") {
+      for (let gy = rect.minGy; gy <= rect.maxGy; gy += 1) {
+        for (let gx = rect.minGx; gx <= rect.maxGx; gx += 1) {
+          if (removePlayAreaCell(gx, gy)) changedCount += 1;
         }
       }
     }
-    return null;
+
+    if (changedCount > 0) {
+      updatePlayAreaSummary();
+      renderSelectionProperties();
+      requestRender();
+    }
+    return { ...rect, changedCount };
   }
 
-  function findBoundaryHit(worldPoint) {
-    for (let i = state.map.boundaries.length - 1; i >= 0; i -= 1) {
-      const boundary = state.map.boundaries[i];
-      const points = boundary.polygonPoints || [];
-      if (points.length >= 3 && pointInPolygon(worldPoint, points)) {
-        return { kind: "boundary", id: boundary.id };
+  function applyBrushAt(worldPoint, mode, overrideTerrainType) {
+    const radius = getBrushRadiusWorld();
+    const density = clamp(Number(state.brush.density || 0.6), 0.1, 1);
+    const randomness = clamp(Number(state.brush.randomness || 0), 0, 1);
+    const softness = clamp(Number(state.brush.softness || 0.7), 0, 1);
+    const terrainType = overrideTerrainType || state.terrainPlacementType;
+    const samples = Math.max(1, Math.round(density * 14));
+    const changed = new Set();
+    let didChange = false;
+
+    for (let i = 0; i < samples; i += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = Math.sqrt(Math.random()) * radius;
+      const falloff = 1 - distance / Math.max(1, radius);
+      const threshold = Math.pow(Math.max(0, falloff), 1 + (1 - softness) * 2);
+      if (Math.random() > Math.max(0.05, threshold)) continue;
+      const jitterDistance = randomness * getGridSize() * 0.25;
+      const jitterAngle = Math.random() * Math.PI * 2;
+      const px = worldPoint.x + Math.cos(angle) * distance + Math.cos(jitterAngle) * jitterDistance;
+      const py = worldPoint.y + Math.sin(angle) * distance + Math.sin(jitterAngle) * jitterDistance;
+      const point = clampPointToMap({ x: px, y: py });
+      const gridPoint = worldToGrid(point);
+      const key = terrainKey(gridPoint.gx, gridPoint.gy);
+
+      if (mode === "paint") {
+        if (setTerrainCell(gridPoint.gx, gridPoint.gy, terrainType, { randomness })) { changed.add(key); didChange = true; }
+      } else if (mode === "erase") {
+        if (removeTerrainCell(gridPoint.gx, gridPoint.gy)) { changed.add(key); didChange = true; }
+      } else if (mode === "play_add") {
+        if (addPlayAreaCell(gridPoint.gx, gridPoint.gy)) { changed.add(key); didChange = true; }
+      } else if (mode === "play_remove") {
+        if (removePlayAreaCell(gridPoint.gx, gridPoint.gy)) { changed.add(key); didChange = true; }
       }
     }
-    return null;
-  }
 
-  function getHitTarget(worldPoint) {
-    return (
-      findBoundaryVertexHit(worldPoint) ||
-      findTerrainHit(worldPoint) ||
-      findCrossingHit(worldPoint) ||
-      findBoundaryHit(worldPoint)
-    );
-  }
-
-  function clearSelection() {
-    state.selected = null;
-    renderSelectionProperties();
-  }
-
-  function setSelection(selection) {
-    state.selected = selection || null;
-    renderSelectionProperties();
-  }
-
-  function findSelectedObject() {
-    if (!state.selected) return null;
-    if (state.selected.kind === "terrain") {
-      return state.map.terrainObjects.find((terrain) => terrain.id === state.selected.id) || null;
-    }
-    if (state.selected.kind === "crossing") {
-      return state.map.crossings.find((crossing) => crossing.id === state.selected.id) || null;
-    }
-    if (state.selected.kind === "boundary") {
-      return state.map.boundaries.find((boundary) => boundary.id === state.selected.id) || null;
-    }
-    return null;
-  }
-
-  function deleteSelection() {
-    if (!state.selected) return;
-    if (state.selected.kind === "terrain") {
-      state.map.terrainObjects = state.map.terrainObjects.filter((item) => item.id !== state.selected.id);
-      setStatus("Terrain deleted.");
-    } else if (state.selected.kind === "crossing") {
-      state.map.crossings = state.map.crossings.filter((item) => item.id !== state.selected.id);
-      setStatus("Crossing deleted.");
-    } else if (state.selected.kind === "boundary") {
-      state.map.boundaries = state.map.boundaries.filter((item) => item.id !== state.selected.id);
-      setStatus("Boundary deleted.");
-    }
-    clearSelection();
-    requestRender();
-  }
-
-  function duplicateSelection() {
-    const selected = findSelectedObject();
-    if (!selected) return;
-    if (state.selected.kind === "terrain") {
-      const duplicate = deepClone(selected);
-      duplicate.id = nextId("terrain");
-      duplicate.x = clamp(duplicate.x + 24, 0, state.map.width);
-      duplicate.y = clamp(duplicate.y + 24, 0, state.map.height);
-      state.map.terrainObjects.push(duplicate);
-      setSelection({ kind: "terrain", id: duplicate.id });
-      setStatus("Terrain duplicated.", "success");
-    } else if (state.selected.kind === "crossing") {
-      const duplicate = deepClone(selected);
-      duplicate.id = nextId("crossing");
-      duplicate.x = clamp(duplicate.x + 24, 0, state.map.width);
-      duplicate.y = clamp(duplicate.y + 24, 0, state.map.height);
-      state.map.crossings.push(duplicate);
-      setSelection({ kind: "crossing", id: duplicate.id });
-      setStatus("Crossing duplicated.", "success");
-    } else if (state.selected.kind === "boundary") {
-      const duplicate = deepClone(selected);
-      duplicate.id = nextId("boundary");
-      duplicate.polygonPoints = duplicate.polygonPoints.map((point) => ({
-        x: clamp(point.x + 24, 0, state.map.width),
-        y: clamp(point.y + 24, 0, state.map.height)
-      }));
-      state.map.boundaries.push(duplicate);
-      setSelection({ kind: "boundary", id: duplicate.id });
-      setStatus("Boundary duplicated.", "success");
-    }
-    requestRender();
-  }
-
-  function beginBoundaryDraftPoint(worldPoint) {
-    const point = clampPointToMap({ x: snapValue(worldPoint.x), y: snapValue(worldPoint.y) });
-    if (!pointInsideMap(point)) return;
-    if (state.boundaryDraft.length >= 3) {
-      const first = state.boundaryDraft[0];
-      const closeDistance = Math.hypot(point.x - first.x, point.y - first.y);
-      if (closeDistance <= 14 / state.camera.zoom) {
-        finalizeBoundaryDraft();
-        return;
-      }
-    }
-    state.boundaryDraft.push(point);
-    setStatus(`Boundary point ${state.boundaryDraft.length} added.`);
-    requestRender();
-  }
-
-  function finalizeBoundaryDraft() {
-    if (state.boundaryDraft.length < 3) {
-      setStatus("Boundary needs at least 3 points.", "error");
-      return;
-    }
-    state.map.boundaries.push({
-      id: nextId("boundary"),
-      polygonPoints: deepClone(state.boundaryDraft),
-      blocksPlayer: true,
-      blocksEnemies: true
-    });
-    state.boundaryDraft = [];
-    setStatus("Boundary finalized.", "success");
-    requestRender();
-  }
-
-  function cancelBoundaryDraft() {
-    if (!state.boundaryDraft.length) return;
-    state.boundaryDraft = [];
-    setStatus("Boundary draft canceled.");
-    requestRender();
-  }
-
-  function placeTerrain(worldPoint) {
-    const point = clampPointToMap({ x: snapValue(worldPoint.x), y: snapValue(worldPoint.y) });
-    const terrain = {
-      id: nextId("terrain"),
-      type: state.terrainPlacementType,
-      x: point.x,
-      y: point.y,
-      rotation: 0,
-      scale: 1
-    };
-    state.map.terrainObjects.push(terrain);
-    setSelection({ kind: "terrain", id: terrain.id });
-    setStatus("Terrain placed.", "success");
-    requestRender();
-  }
-
-  function placeCrossing(worldPoint) {
-    const point = clampPointToMap({ x: snapValue(worldPoint.x), y: snapValue(worldPoint.y) });
-    const crossing = {
-      id: nextId("crossing"),
-      type: state.crossingPlacementType,
-      x: point.x,
-      y: point.y,
-      orientation: 0,
-      width: 80,
-      length: 28
-    };
-    if (!isCrossingPlacementValid(crossing)) {
-      setStatus("Crossing must be placed on a boundary edge.", "error");
-      return;
-    }
-    state.map.crossings.push(crossing);
-    setSelection({ kind: "crossing", id: crossing.id });
-    setStatus("Crossing placed.", "success");
-    requestRender();
-  }
-
-  function deleteAtPoint(worldPoint) {
-    const hit = getHitTarget(worldPoint);
-    if (!hit) {
-      setStatus("Nothing to delete at this location.");
-      return;
-    }
-    setSelection(hit);
-    deleteSelection();
-  }
-
-  function requestRender() {
-    state.needsRender = true;
-  }
-
-  function resizeCanvas() {
-    const rect = dom.canvas.getBoundingClientRect();
-    const width = Math.max(1, Math.floor(rect.width));
-    const height = Math.max(1, Math.floor(rect.height));
-    if (dom.canvas.width !== width || dom.canvas.height !== height) {
-      dom.canvas.width = width;
-      dom.canvas.height = height;
+    if (mode === "paint" && changed.size) smoothTerrainCells(changed, terrainType);
+    if (didChange) {
+      updatePlayAreaSummary();
+      renderSelectionProperties();
       requestRender();
     }
   }
 
-  function drawGrid(theme) {
-    if (!state.grid.visible) return;
-    const spacing = Math.max(8, Number(state.grid.size || 32));
-    ctx.strokeStyle = theme.grid;
-    ctx.lineWidth = 1;
-
-    const topLeftWorld = screenToWorld({ x: 0, y: 0 });
-    const bottomRightWorld = screenToWorld({ x: dom.canvas.width, y: dom.canvas.height });
-    const startX = Math.floor(topLeftWorld.x / spacing) * spacing;
-    const endX = Math.ceil(bottomRightWorld.x / spacing) * spacing;
-    const startY = Math.floor(topLeftWorld.y / spacing) * spacing;
-    const endY = Math.ceil(bottomRightWorld.y / spacing) * spacing;
-
-    for (let x = startX; x <= endX; x += spacing) {
-      const p0 = worldToScreen({ x, y: startY });
-      const p1 = worldToScreen({ x, y: endY });
-      ctx.beginPath();
-      ctx.moveTo(p0.x, p0.y);
-      ctx.lineTo(p1.x, p1.y);
-      ctx.stroke();
-    }
-
-    for (let y = startY; y <= endY; y += spacing) {
-      const p0 = worldToScreen({ x: startX, y });
-      const p1 = worldToScreen({ x: endX, y });
-      ctx.beginPath();
-      ctx.moveTo(p0.x, p0.y);
-      ctx.lineTo(p1.x, p1.y);
-      ctx.stroke();
+  function applyBrushBetween(fromPoint, toPoint, mode, overrideTerrainType) {
+    const distance = Math.hypot(toPoint.x - fromPoint.x, toPoint.y - fromPoint.y);
+    const step = Math.max(4, getBrushRadiusWorld() * 0.32);
+    const count = Math.max(1, Math.ceil(distance / step));
+    for (let i = 0; i <= count; i += 1) {
+      const t = count === 0 ? 1 : i / count;
+      const point = { x: fromPoint.x + (toPoint.x - fromPoint.x) * t, y: fromPoint.y + (toPoint.y - fromPoint.y) * t };
+      applyBrushAt(point, mode, overrideTerrainType);
     }
   }
 
-  function drawMapBounds(theme) {
-    const topLeft = worldToScreen({ x: 0, y: 0 });
-    const bottomRight = worldToScreen({ x: state.map.width, y: state.map.height });
-    const width = bottomRight.x - topLeft.x;
-    const height = bottomRight.y - topLeft.y;
-    ctx.fillStyle = theme.mapFill;
-    ctx.fillRect(topLeft.x, topLeft.y, width, height);
-    ctx.strokeStyle = theme.mapBorder;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(topLeft.x, topLeft.y, width, height);
+  function applyRiverStroke(points) {
+    if (!Array.isArray(points) || points.length < 2) return;
+    const riverTerrainType = ["water", "path"].includes(state.terrainPlacementType) ? state.terrainPlacementType : "path";
+    for (let i = 1; i < points.length; i += 1) applyBrushBetween(points[i - 1], points[i], "paint", riverTerrainType);
+    setStatus(`${TOOL_LABELS.river} applied as ${riverTerrainType}.`, "success");
   }
 
-  function drawBoundaries(theme) {
-    state.map.boundaries.forEach((boundary) => {
-      const points = boundary.polygonPoints || [];
-      if (points.length < 3) return;
-      ctx.beginPath();
-      points.forEach((point, index) => {
-        const screen = worldToScreen(point);
-        if (index === 0) {
-          ctx.moveTo(screen.x, screen.y);
-        } else {
-          ctx.lineTo(screen.x, screen.y);
-        }
-      });
-      ctx.closePath();
-      ctx.fillStyle = theme.boundaryFill;
-      ctx.fill();
-      ctx.strokeStyle = theme.boundaryStroke;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      if (state.selected && state.selected.kind === "boundary" && state.selected.id === boundary.id) {
-        points.forEach((point, pointIndex) => {
-          const screen = worldToScreen(point);
-          const selectedVertex = pointIndex === state.selected.vertexIndex;
-          ctx.fillStyle = selectedVertex ? "#fff2a1" : "#d9ebff";
-          ctx.strokeStyle = "#1a2d45";
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.arc(screen.x, screen.y, selectedVertex ? 6 : 5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-        });
-      }
-    });
+  function findTerrainHit(worldPoint) {
+    const grid = getGridSize();
+    for (let i = state.map.terrain.length - 1; i >= 0; i -= 1) {
+      const stamp = state.map.terrain[i];
+      const radius = grid * 0.45 * Math.max(0.7, Number(stamp.scale || 1));
+      if (Math.hypot(worldPoint.x - stamp.x, worldPoint.y - stamp.y) <= radius) return stamp;
+    }
+    return null;
   }
 
-  function drawBoundaryDraft() {
-    if (!state.boundaryDraft.length) return;
-    ctx.strokeStyle = "#ffd585";
-    ctx.fillStyle = "rgba(255, 192, 80, 0.2)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    state.boundaryDraft.forEach((point, index) => {
-      const screen = worldToScreen(point);
-      if (index === 0) {
-        ctx.moveTo(screen.x, screen.y);
-      } else {
-        ctx.lineTo(screen.x, screen.y);
-      }
-    });
-    ctx.stroke();
+  function clearSelection() { state.selectedTerrainId = null; renderSelectionProperties(); }
+  function setSelection(stamp) { state.selectedTerrainId = stamp ? stamp.id : null; renderSelectionProperties(); }
 
-    state.boundaryDraft.forEach((point, index) => {
-      const screen = worldToScreen(point);
-      ctx.fillStyle = index === 0 ? "#ffefaf" : "#ffe0a9";
-      ctx.beginPath();
-      ctx.arc(screen.x, screen.y, 4.5, 0, Math.PI * 2);
-      ctx.fill();
-    });
+  function deleteSelection() {
+    if (!state.selectedTerrainId) return;
+    const selected = findTerrainStampById(state.selectedTerrainId);
+    if (!selected) {
+      state.selectedTerrainId = null;
+      renderSelectionProperties();
+      return;
+    }
+    pushHistory("Delete stamp");
+    removeTerrainCell(selected.gx, selected.gy);
+    state.selectedTerrainId = null;
+    renderSelectionProperties();
+    requestRender();
+    setStatus("Terrain stamp deleted.", "success");
   }
 
-  function drawTerrain(theme) {
-    state.map.terrainObjects.forEach((terrain) => {
-      const type = getTerrainType(terrain.type);
-      const baseRadius = type.baseRadius * (terrain.scale || 1);
-      const center = worldToScreen({ x: terrain.x, y: terrain.y });
-      const radius = baseRadius * state.camera.zoom;
-      const fill = (theme.terrain && theme.terrain[terrain.type]) || theme.terrain.default || "#6f7f77";
-      ctx.fillStyle = fill;
-      ctx.beginPath();
-      ctx.arc(center.x, center.y, Math.max(2, radius), 0, Math.PI * 2);
-      ctx.fill();
-
-      if (state.selected && state.selected.kind === "terrain" && state.selected.id === terrain.id) {
-        ctx.strokeStyle = "#fff0b2";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(center.x, center.y, Math.max(4, radius + 4), 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    });
-  }
-
-  function drawCrossings(theme) {
-    state.map.crossings.forEach((crossing) => {
-      const center = worldToScreen(crossing);
-      const width = Math.max(16, Number(crossing.width || 70)) * state.camera.zoom;
-      const height = Math.max(8, Number(crossing.length || 26)) * state.camera.zoom;
-      const angle = (Number(crossing.orientation || 0) * Math.PI) / 180;
-
-      ctx.save();
-      ctx.translate(center.x, center.y);
-      ctx.rotate(angle);
-      ctx.fillStyle = theme.crossingFill;
-      ctx.strokeStyle = theme.crossingStroke;
-      ctx.lineWidth = 2;
-      ctx.fillRect(-width * 0.5, -height * 0.5, width, height);
-      ctx.strokeRect(-width * 0.5, -height * 0.5, width, height);
-
-      if (state.selected && state.selected.kind === "crossing" && state.selected.id === crossing.id) {
-        ctx.strokeStyle = "#fff0b2";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(-width * 0.5 - 4, -height * 0.5 - 4, width + 8, height + 8);
-      }
-      ctx.restore();
-    });
+  function duplicateSelection() {
+    if (!state.selectedTerrainId) return;
+    const selected = findTerrainStampById(state.selectedTerrainId);
+    if (!selected) return;
+    pushHistory("Duplicate stamp");
+    const duplicateGx = selected.gx + 1;
+    const duplicateGy = selected.gy + 1;
+    setTerrainCell(duplicateGx, duplicateGy, selected.terrainType, { randomness: state.brush.randomness });
+    const duplicate = findTerrainStampByGrid(duplicateGx, duplicateGy);
+    if (duplicate) {
+      duplicate.scale = selected.scale;
+      duplicate.rotationDeg = selected.rotationDeg;
+      setSelection(duplicate);
+    }
+    requestRender();
+    setStatus("Terrain stamp duplicated.", "success");
   }
 
   function wrapField(labelText, inputElement) {
@@ -810,29 +608,13 @@
     return input;
   }
 
-  function buildPositionRow(target) {
-    const row = document.createElement("div");
-    row.className = "selection-row";
-    const xInput = numberInput(target.x, 0, state.map.width, 1, (value) => {
-      target.x = value;
-      requestRender();
-    });
-    const yInput = numberInput(target.y, 0, state.map.height, 1, (value) => {
-      target.y = value;
-      requestRender();
-    });
-    row.appendChild(wrapField("X", xInput));
-    row.appendChild(wrapField("Y", yInput));
-    return row;
-  }
-
   function renderSelectionProperties() {
     dom.selectionProperties.innerHTML = "";
-    const selected = findSelectedObject();
-    if (!selected || !state.selected) {
+    const selected = state.selectedTerrainId ? findTerrainStampById(state.selectedTerrainId) : null;
+    if (!selected) {
       const empty = document.createElement("p");
       empty.className = "muted";
-      empty.textContent = "Select an object to edit position, type, and dimensions.";
+      empty.textContent = "Select terrain with the Select tool to inspect/edit a stamp.";
       dom.selectionProperties.appendChild(empty);
       return;
     }
@@ -840,134 +622,385 @@
     const card = document.createElement("div");
     card.className = "selection-card";
     const title = document.createElement("h3");
-    title.textContent = `${state.selected.kind.charAt(0).toUpperCase()}${state.selected.kind.slice(1)} Selected`;
+    title.textContent = `Terrain Stamp (${selected.terrainType})`;
     card.appendChild(title);
 
-    if (state.selected.kind === "terrain") {
-      const row = document.createElement("div");
-      row.className = "selection-row";
-      const typeField = document.createElement("select");
-      typeField.className = "input";
-      TERRAIN_TYPES.forEach((type) => {
-        const option = document.createElement("option");
-        option.value = type.id;
-        option.textContent = type.label;
-        if (selected.type === type.id) option.selected = true;
-        typeField.appendChild(option);
-      });
-      typeField.addEventListener("change", () => {
-        selected.type = typeField.value;
-        requestRender();
-      });
-      row.appendChild(wrapField("Type", typeField));
+    const row = document.createElement("div");
+    row.className = "selection-row";
+    const typeSelect = document.createElement("select");
+    typeSelect.className = "input";
+    TERRAIN_TYPES.forEach((type) => {
+      const option = document.createElement("option");
+      option.value = type.id;
+      option.textContent = type.label;
+      if (selected.terrainType === type.id) option.selected = true;
+      typeSelect.appendChild(option);
+    });
+    typeSelect.addEventListener("change", () => {
+      selected.terrainType = typeSelect.value;
+      selected.layer = getTerrainLayer(typeSelect.value);
+      requestRender();
+    });
+    row.appendChild(wrapField("Type", typeSelect));
+    row.appendChild(wrapField("Scale", numberInput(selected.scale, 0.6, 1.6, 0.05, (value) => { selected.scale = value; requestRender(); })));
+    card.appendChild(row);
 
-      const scaleInput = document.createElement("input");
-      scaleInput.className = "input";
-      scaleInput.type = "number";
-      scaleInput.min = "0.2";
-      scaleInput.max = "4";
-      scaleInput.step = "0.1";
-      scaleInput.value = String(Number(selected.scale || 1).toFixed(2));
-      scaleInput.addEventListener("change", () => {
-        selected.scale = clamp(Number(scaleInput.value) || 1, 0.2, 4);
-        scaleInput.value = String(selected.scale.toFixed(2));
-        requestRender();
-      });
-      row.appendChild(wrapField("Scale", scaleInput));
-      card.appendChild(row);
-      card.appendChild(buildPositionRow(selected));
-    } else if (state.selected.kind === "crossing") {
-      const row = document.createElement("div");
-      row.className = "selection-row";
-      const widthInput = numberInput(selected.width, 24, 420, 1, (value) => {
-        selected.width = value;
-        requestRender();
-      });
-      const lengthInput = numberInput(selected.length, 10, 260, 1, (value) => {
-        selected.length = value;
-        requestRender();
-      });
-      row.appendChild(wrapField("Width", widthInput));
-      row.appendChild(wrapField("Length", lengthInput));
-      card.appendChild(row);
+    const row2 = document.createElement("div");
+    row2.className = "selection-row";
+    row2.appendChild(wrapField("Rotation", numberInput(selected.rotationDeg, -45, 45, 1, (value) => { selected.rotationDeg = value; requestRender(); })));
+    row2.appendChild(wrapField("Variant", numberInput(selected.variantIndex + 1, 1, 4, 1, (value) => { selected.variantIndex = Math.max(0, Math.floor(value) - 1); requestRender(); })));
+    card.appendChild(row2);
 
-      const row2 = document.createElement("div");
-      row2.className = "selection-row";
-      const orientationInput = numberInput(selected.orientation, -180, 180, 1, (value) => {
-        selected.orientation = value;
-        requestRender();
-      });
-      const crossingType = document.createElement("select");
-      crossingType.className = "input";
-      CROSSING_TYPES.forEach((type) => {
-        const option = document.createElement("option");
-        option.value = type.id;
-        option.textContent = type.label;
-        if (selected.type === type.id) option.selected = true;
-        crossingType.appendChild(option);
-      });
-      crossingType.addEventListener("change", () => {
-        selected.type = crossingType.value;
-        requestRender();
-      });
-      row2.appendChild(wrapField("Orientation", orientationInput));
-      row2.appendChild(wrapField("Type", crossingType));
-      card.appendChild(row2);
-      card.appendChild(buildPositionRow(selected));
-    } else if (state.selected.kind === "boundary") {
-      const points = selected.polygonPoints || [];
-      const info = document.createElement("div");
-      info.className = "muted";
-      info.textContent = `Vertices: ${points.length}. Drag points on canvas to edit shape.`;
-      card.appendChild(info);
-
-      points.forEach((point, index) => {
-        const row = document.createElement("div");
-        row.className = "selection-row";
-        const xInput = numberInput(point.x, 0, state.map.width, 1, (value) => {
-          point.x = value;
-          requestRender();
-        });
-        const yInput = numberInput(point.y, 0, state.map.height, 1, (value) => {
-          point.y = value;
-          requestRender();
-        });
-        row.appendChild(wrapField(`P${index + 1} X`, xInput));
-        row.appendChild(wrapField(`P${index + 1} Y`, yInput));
-        card.appendChild(row);
-      });
-    }
+    const positionRow = document.createElement("div");
+    positionRow.className = "selection-row";
+    positionRow.appendChild(wrapField("X", numberInput(selected.x, 0, state.map.width, 1, (value) => { selected.x = value; selected.gx = worldToGrid({ x: selected.x, y: selected.y }).gx; selected.key = terrainKey(selected.gx, selected.gy); requestRender(); })));
+    positionRow.appendChild(wrapField("Y", numberInput(selected.y, 0, state.map.height, 1, (value) => { selected.y = value; selected.gy = worldToGrid({ x: selected.x, y: selected.y }).gy; selected.key = terrainKey(selected.gx, selected.gy); requestRender(); })));
+    card.appendChild(positionRow);
 
     const actions = document.createElement("div");
     actions.className = "selection-actions";
     const duplicateBtn = document.createElement("button");
-    duplicateBtn.className = "btn";
     duplicateBtn.type = "button";
+    duplicateBtn.className = "btn";
     duplicateBtn.textContent = "Duplicate";
-    duplicateBtn.addEventListener("click", () => duplicateSelection());
+    duplicateBtn.addEventListener("click", duplicateSelection);
     actions.appendChild(duplicateBtn);
     const deleteBtn = document.createElement("button");
-    deleteBtn.className = "btn btn-danger";
     deleteBtn.type = "button";
+    deleteBtn.className = "btn btn-danger";
     deleteBtn.textContent = "Delete";
-    deleteBtn.addEventListener("click", () => deleteSelection());
+    deleteBtn.addEventListener("click", deleteSelection);
     actions.appendChild(deleteBtn);
     card.appendChild(actions);
-
-    const validation = validateMapData(toJsonMap());
-    if (validation.errors.length) {
-      const errors = document.createElement("div");
-      errors.className = "validation-errors";
-      errors.textContent = validation.errors[0];
-      card.appendChild(errors);
-    } else if (validation.warnings.length) {
-      const warnings = document.createElement("div");
-      warnings.className = "validation-warnings";
-      warnings.textContent = validation.warnings[0];
-      card.appendChild(warnings);
-    }
-
     dom.selectionProperties.appendChild(card);
+  }
+
+  function resizeCanvas() {
+    const rect = dom.canvas.getBoundingClientRect();
+    const width = Math.max(1, Math.floor(rect.width));
+    const height = Math.max(1, Math.floor(rect.height));
+    if (dom.canvas.width !== width || dom.canvas.height !== height) {
+      dom.canvas.width = width;
+      dom.canvas.height = height;
+      requestRender();
+    }
+  }
+
+  function drawMapBounds(theme) {
+    const topLeft = worldToScreen({ x: 0, y: 0 });
+    const bottomRight = worldToScreen({ x: state.map.width, y: state.map.height });
+    const width = bottomRight.x - topLeft.x;
+    const height = bottomRight.y - topLeft.y;
+    ctx.fillStyle = theme.mapFill;
+    ctx.fillRect(topLeft.x, topLeft.y, width, height);
+    ctx.strokeStyle = theme.mapBorder;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(topLeft.x, topLeft.y, width, height);
+  }
+
+  function getAssetPathForStamp(themeId, terrainType, variantIndex) {
+    const variant = (Math.max(0, Number(variantIndex || 0)) % 4) + 1;
+    return `../../assets/themes/${themeId}/${terrainType}/${terrainType}_${String(variant).padStart(2, "0")}.png`;
+  }
+
+  function loadImageCached(url) {
+    if (!url) return null;
+    const cached = state.assetCache[url];
+    if (cached) return cached;
+    const image = new Image();
+    image.src = url;
+    state.assetCache[url] = image;
+    return image;
+  }
+
+  function drawTerrainStampFallback(stamp, theme, center, pixelSize) {
+    const color = (theme.palette && theme.palette[stamp.terrainType]) || "#6f7f77";
+    ctx.fillStyle = color;
+    if (stamp.terrainType === "trees") {
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, pixelSize * 0.42, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(25, 15, 8, 0.45)";
+      ctx.fillRect(center.x - pixelSize * 0.1, center.y + pixelSize * 0.1, pixelSize * 0.2, pixelSize * 0.24);
+      return;
+    }
+    if (stamp.terrainType === "water") {
+      ctx.fillRect(center.x - pixelSize * 0.5, center.y - pixelSize * 0.5, pixelSize, pixelSize);
+      return;
+    }
+    if (stamp.terrainType === "path") {
+      ctx.fillRect(center.x - pixelSize * 0.48, center.y - pixelSize * 0.3, pixelSize * 0.96, pixelSize * 0.6);
+      return;
+    }
+    if (stamp.terrainType === "walls") {
+      ctx.fillRect(center.x - pixelSize * 0.5, center.y - pixelSize * 0.5, pixelSize, pixelSize);
+      ctx.strokeStyle = "rgba(15, 18, 24, 0.5)";
+      ctx.lineWidth = Math.max(1, pixelSize * 0.04);
+      ctx.strokeRect(center.x - pixelSize * 0.5, center.y - pixelSize * 0.5, pixelSize, pixelSize);
+      return;
+    }
+    ctx.fillRect(center.x - pixelSize * 0.5, center.y - pixelSize * 0.5, pixelSize, pixelSize);
+  }
+
+  function drawTerrainTransitions(terrainByKey, theme) {
+    const transition = (theme && theme.transition) || {};
+    const grid = getGridSize() * state.camera.zoom;
+    state.map.terrain.forEach((stamp) => {
+      if (!["water", "path"].includes(stamp.terrainType)) return;
+      const edgeColor = stamp.terrainType === "water" ? transition.waterEdge : transition.pathEdge;
+      if (!edgeColor) return;
+      const center = worldToScreen({ x: stamp.x + (stamp.jitterX || 0), y: stamp.y + (stamp.jitterY || 0) });
+      const half = grid * 0.5 * Math.max(0.75, Number(stamp.scale || 1));
+      const neighbors = [{ dx: 1, dy: 0, side: "right" }, { dx: -1, dy: 0, side: "left" }, { dx: 0, dy: 1, side: "bottom" }, { dx: 0, dy: -1, side: "top" }];
+      ctx.strokeStyle = edgeColor;
+      ctx.lineWidth = Math.max(1, grid * 0.06);
+      neighbors.forEach((neighbor) => {
+        const near = terrainByKey[terrainKey(stamp.gx + neighbor.dx, stamp.gy + neighbor.dy)];
+        if (near && near.terrainType === stamp.terrainType) return;
+        ctx.beginPath();
+        if (neighbor.side === "right") { ctx.moveTo(center.x + half, center.y - half); ctx.lineTo(center.x + half, center.y + half); }
+        else if (neighbor.side === "left") { ctx.moveTo(center.x - half, center.y - half); ctx.lineTo(center.x - half, center.y + half); }
+        else if (neighbor.side === "bottom") { ctx.moveTo(center.x - half, center.y + half); ctx.lineTo(center.x + half, center.y + half); }
+        else { ctx.moveTo(center.x - half, center.y - half); ctx.lineTo(center.x + half, center.y - half); }
+        ctx.stroke();
+      });
+    });
+  }
+
+  function drawTerrain(theme) {
+    const grid = getGridSize();
+    const terrainByKey = Object.create(null);
+    state.map.terrain.forEach((stamp) => { terrainByKey[stamp.key] = stamp; });
+    const order = { terrain: 0, props: 1, collision: 2 };
+    const sorted = state.map.terrain.slice().sort((a, b) => (order[a.layer] || 0) - (order[b.layer] || 0));
+
+    sorted.forEach((stamp) => {
+      if (stamp.layer === "terrain" && !state.layerVisibility.terrain) return;
+      if (stamp.layer === "props" && !state.layerVisibility.props) return;
+      if (stamp.layer === "collision" && !state.layerVisibility.collision) return;
+      const pixelSize = grid * state.camera.zoom * Math.max(0.75, Number(stamp.scale || 1));
+      if (pixelSize < 1) return;
+      const center = worldToScreen({ x: stamp.x + (stamp.jitterX || 0), y: stamp.y + (stamp.jitterY || 0) });
+      const rotation = ((Number(stamp.rotationDeg || 0) || 0) * Math.PI) / 180;
+      ctx.save();
+      ctx.translate(center.x, center.y);
+      ctx.rotate(rotation);
+      const image = loadImageCached(getAssetPathForStamp(state.themePreviewId, stamp.terrainType, stamp.variantIndex));
+      if (image && image.complete && image.naturalWidth > 0) {
+        ctx.drawImage(image, -pixelSize * 0.5, -pixelSize * 0.5, pixelSize, pixelSize);
+      } else {
+        drawTerrainStampFallback(stamp, theme, { x: 0, y: 0 }, pixelSize);
+      }
+      if (state.selectedTerrainId === stamp.id) {
+        ctx.strokeStyle = "#fff0b2";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-pixelSize * 0.58, -pixelSize * 0.58, pixelSize * 1.16, pixelSize * 1.16);
+      }
+      ctx.restore();
+    });
+
+    if (state.layerVisibility.terrain) drawTerrainTransitions(terrainByKey, theme);
+  }
+
+  function drawBackgroundLayer() {
+    if (!state.layerVisibility.background) return;
+    if (!state.map.backgroundImage || !state.map.backgroundImage.src) return;
+    const bg = state.map.backgroundImage;
+    const image = loadImageCached(bg.src);
+    if (!image || !image.complete || image.naturalWidth <= 0) return;
+    const center = worldToScreen({ x: state.map.width * 0.5 + Number(bg.offsetX || 0), y: state.map.height * 0.5 + Number(bg.offsetY || 0) });
+    const width = image.naturalWidth * Number(bg.scale || 1) * state.camera.zoom;
+    const height = image.naturalHeight * Number(bg.scale || 1) * state.camera.zoom;
+    ctx.save();
+    ctx.globalAlpha = clamp(Number(bg.opacity || 0.5), 0, 1);
+    ctx.drawImage(image, center.x - width * 0.5, center.y - height * 0.5, width, height);
+    ctx.restore();
+  }
+
+  function drawGrid(theme) {
+    if (!state.grid.visible) return;
+    const spacing = Math.max(8, Number(state.grid.size || 32));
+    ctx.strokeStyle = theme.grid;
+    ctx.lineWidth = 1;
+    const topLeftWorld = screenToWorld({ x: 0, y: 0 });
+    const bottomRightWorld = screenToWorld({ x: dom.canvas.width, y: dom.canvas.height });
+    const startX = Math.floor(topLeftWorld.x / spacing) * spacing;
+    const endX = Math.ceil(bottomRightWorld.x / spacing) * spacing;
+    const startY = Math.floor(topLeftWorld.y / spacing) * spacing;
+    const endY = Math.ceil(bottomRightWorld.y / spacing) * spacing;
+    for (let x = startX; x <= endX; x += spacing) {
+      const p0 = worldToScreen({ x, y: startY });
+      const p1 = worldToScreen({ x, y: endY });
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.stroke();
+    }
+    for (let y = startY; y <= endY; y += spacing) {
+      const p0 = worldToScreen({ x: startX, y });
+      const p1 = worldToScreen({ x: endX, y });
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.stroke();
+    }
+  }
+
+  function drawPlayAreaOverlay() {
+    if (!state.layerVisibility.playArea) return;
+    const maskCells = Array.isArray(state.map.playAreaMask) ? state.map.playAreaMask : [];
+    if (!maskCells.length) return;
+
+    const topLeft = worldToScreen({ x: 0, y: 0 });
+    const bottomRight = worldToScreen({ x: state.map.width, y: state.map.height });
+    const mapWidth = bottomRight.x - topLeft.x;
+    const mapHeight = bottomRight.y - topLeft.y;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(0, 0, 0, 0.48)";
+    ctx.fillRect(topLeft.x, topLeft.y, mapWidth, mapHeight);
+    ctx.globalCompositeOperation = "destination-out";
+    const cellSize = getGridSize() * state.camera.zoom;
+    maskCells.forEach((cell) => {
+      const screen = worldToScreen(gridToWorld(cell.gx, cell.gy));
+      ctx.fillRect(screen.x - cellSize * 0.5, screen.y - cellSize * 0.5, cellSize, cellSize);
+    });
+    ctx.restore();
+
+    const lookup = Object.create(null);
+    maskCells.forEach((cell) => { lookup[playAreaKey(cell.gx, cell.gy)] = true; });
+    ctx.strokeStyle = "rgba(132, 208, 255, 0.72)";
+    ctx.lineWidth = Math.max(1, state.camera.zoom * 1.1);
+
+    maskCells.forEach((cell) => {
+      const center = worldToScreen(gridToWorld(cell.gx, cell.gy));
+      const half = (getGridSize() * state.camera.zoom) * 0.5;
+      const neighbors = [{ gx: cell.gx + 1, gy: cell.gy, side: "right" }, { gx: cell.gx - 1, gy: cell.gy, side: "left" }, { gx: cell.gx, gy: cell.gy + 1, side: "bottom" }, { gx: cell.gx, gy: cell.gy - 1, side: "top" }];
+      neighbors.forEach((neighbor) => {
+        if (lookup[playAreaKey(neighbor.gx, neighbor.gy)]) return;
+        ctx.beginPath();
+        if (neighbor.side === "right") { ctx.moveTo(center.x + half, center.y - half); ctx.lineTo(center.x + half, center.y + half); }
+        else if (neighbor.side === "left") { ctx.moveTo(center.x - half, center.y - half); ctx.lineTo(center.x - half, center.y + half); }
+        else if (neighbor.side === "bottom") { ctx.moveTo(center.x - half, center.y + half); ctx.lineTo(center.x + half, center.y + half); }
+        else { ctx.moveTo(center.x - half, center.y - half); ctx.lineTo(center.x + half, center.y - half); }
+        ctx.stroke();
+      });
+    });
+  }
+
+  function drawRiverPreview() {
+    if (!state.stroke || state.stroke.tool !== "river" || !Array.isArray(state.stroke.points) || state.stroke.points.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = "rgba(126, 204, 255, 0.78)";
+    ctx.lineWidth = Math.max(2, getBrushRadiusWorld() * state.camera.zoom * 0.24);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    state.stroke.points.forEach((point, index) => {
+      const screen = worldToScreen(point);
+      if (index === 0) ctx.moveTo(screen.x, screen.y);
+      else ctx.lineTo(screen.x, screen.y);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPlayAreaRectPreview() {
+    if (!state.stroke || state.stroke.tool !== "play_area_rect") return;
+    const startPoint = Array.isArray(state.stroke.points) && state.stroke.points.length ? state.stroke.points[0] : null;
+    if (!startPoint) return;
+    const endPoint = state.stroke.lastPoint || startPoint;
+    const rect = getGridRectFromWorldPoints(startPoint, endPoint);
+    const topLeftWorld = gridToWorld(rect.minGx, rect.minGy);
+    const bottomRightWorld = gridToWorld(rect.maxGx, rect.maxGy);
+    const cellSize = getGridSize();
+    const minScreen = worldToScreen({ x: topLeftWorld.x - cellSize * 0.5, y: topLeftWorld.y - cellSize * 0.5 });
+    const maxScreen = worldToScreen({ x: bottomRightWorld.x + cellSize * 0.5, y: bottomRightWorld.y + cellSize * 0.5 });
+    const width = maxScreen.x - minScreen.x;
+    const height = maxScreen.y - minScreen.y;
+    const mode = String(state.stroke.mode || "play_rect_set");
+
+    ctx.save();
+    ctx.fillStyle = mode === "play_rect_remove" ? "rgba(255, 126, 126, 0.18)" : "rgba(126, 204, 255, 0.18)";
+    ctx.strokeStyle = mode === "play_rect_remove" ? "rgba(255, 140, 140, 0.95)" : "rgba(132, 208, 255, 0.95)";
+    ctx.lineWidth = Math.max(1.5, state.camera.zoom * 1.4);
+    ctx.setLineDash([8, 5]);
+    ctx.fillRect(minScreen.x, minScreen.y, width, height);
+    ctx.strokeRect(minScreen.x, minScreen.y, width, height);
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  function drawPlayerStartPing() {
+    const playerStart = state.map && state.map.playerStart;
+    if (!playerStart || !Number.isFinite(Number(playerStart.x)) || !Number.isFinite(Number(playerStart.y))) return;
+    if (!pointInsideMap(playerStart)) return;
+
+    const center = worldToScreen(playerStart);
+    const base = Math.max(8, getGridSize() * state.camera.zoom * 0.34);
+    const ring = base * 1.5;
+    const stemTop = center.y - base * 0.08;
+    const stemBottom = center.y + base * 1.05;
+    const tipY = center.y + base * 1.55;
+
+    ctx.save();
+    ctx.lineWidth = Math.max(1, state.camera.zoom * 1.5);
+    ctx.strokeStyle = "rgba(255, 117, 117, 0.95)";
+    ctx.fillStyle = "rgba(255, 117, 117, 0.16)";
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, ring, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(center.x - base * 0.36, stemBottom);
+    ctx.lineTo(center.x + base * 0.36, stemBottom);
+    ctx.lineTo(center.x, tipY);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(255, 117, 117, 0.88)";
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, base * 0.62, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255, 117, 117, 0.95)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, base * 0.3, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255, 240, 228, 0.95)";
+    ctx.fill();
+
+    ctx.font = `${Math.max(10, Math.round(state.camera.zoom * 11))}px monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillStyle = "rgba(255, 214, 214, 0.95)";
+    ctx.fillText("START", center.x, stemTop - base * 0.35);
+    ctx.restore();
+  }
+
+  function drawBrushCursor() {
+    if (!["paint", "eraser", "play_area", "play_area_rect", "river", "player_start"].includes(state.tool)) return;
+    if (!pointInsideMap(state.hoverWorld)) return;
+    const screen = worldToScreen(state.hoverWorld);
+    const radius = getBrushRadiusWorld() * state.camera.zoom;
+    ctx.save();
+    const isEraser = state.tool === "eraser";
+    const isStartTool = state.tool === "player_start";
+    ctx.strokeStyle = isEraser
+      ? "rgba(255, 118, 118, 0.9)"
+      : isStartTool
+        ? "rgba(255, 164, 164, 0.92)"
+        : "rgba(156, 218, 255, 0.9)";
+    ctx.fillStyle = isEraser
+      ? "rgba(255, 120, 120, 0.12)"
+      : isStartTool
+        ? "rgba(255, 117, 117, 0.14)"
+        : "rgba(126, 204, 255, 0.1)";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, Math.max(4, isStartTool ? getGridSize() * state.camera.zoom * 0.5 : radius), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 
   function render() {
@@ -975,71 +1008,103 @@
     state.needsRender = false;
     resizeCanvas();
     const theme = getTheme(state.themePreviewId);
-
     ctx.clearRect(0, 0, dom.canvas.width, dom.canvas.height);
     ctx.fillStyle = "#0c121a";
     ctx.fillRect(0, 0, dom.canvas.width, dom.canvas.height);
-
     drawMapBounds(theme);
-    drawGrid(theme);
-    drawBoundaries(theme);
-    drawCrossings(theme);
+    drawBackgroundLayer();
     drawTerrain(theme);
-    drawBoundaryDraft();
-
-    dom.modeLabel.textContent = `Tool: ${state.tool.charAt(0).toUpperCase()}${state.tool.slice(1)}`;
+    drawPlayAreaOverlay();
+    drawPlayerStartPing();
+    drawGrid(theme);
+    drawRiverPreview();
+    drawPlayAreaRectPreview();
+    drawBrushCursor();
+    dom.modeLabel.textContent = `Tool: ${TOOL_LABELS[state.tool] || state.tool}`;
     dom.coordsLabel.textContent = `World: ${Math.round(state.hoverWorld.x)}, ${Math.round(state.hoverWorld.y)}`;
     dom.zoomLabel.textContent = `Zoom: ${(state.camera.zoom * 100).toFixed(0)}%`;
   }
 
-  function renderLoop() {
-    render();
-    requestAnimationFrame(renderLoop);
-  }
-
-  function setTool(tool) {
-    state.tool = tool;
-    state.boundaryDraft = [];
-    state.drag = null;
-    Array.from(dom.toolButtons.querySelectorAll("[data-tool]")).forEach((button) => {
-      button.classList.toggle("active", button.dataset.tool === tool);
-    });
-    setStatus(`Tool changed to ${tool}.`);
-    requestRender();
-  }
-
-  function loadIntoState(mapData, options) {
-    const safeOptions = options || {};
-    if (safeOptions.activeLevelId && LEVEL_OPTIONS.some((level) => level.id === safeOptions.activeLevelId)) {
-      state.activeLevelId = safeOptions.activeLevelId;
-    }
-    state.map = normalizeMapData(mapData);
-    if (state.map.levelId && LEVEL_OPTIONS.some((level) => level.id === state.map.levelId)) {
-      state.activeLevelId = state.map.levelId;
-    } else {
-      state.map.levelId = state.activeLevelId;
-    }
-    state.themePreviewId = state.map.defaultThemeId;
-    state.camera.x = state.map.width * 0.5;
-    state.camera.y = state.map.height * 0.5;
-    state.boundaryDraft = [];
-    clearSelection();
-    syncMapInputs();
-    if (dom.levelEditSelect) {
-      dom.levelEditSelect.value = state.activeLevelId;
-    }
-    setValidationSummary([], []);
-    setStatus(`Loaded map "${state.map.name}".`, "success");
-    requestRender();
-  }
+  function renderLoop() { render(); requestAnimationFrame(renderLoop); }
 
   function syncMapInputs() {
     dom.mapIdInput.value = state.map.id;
     dom.mapNameInput.value = state.map.name;
     dom.mapWidthInput.value = String(Math.round(state.map.width));
     dom.mapHeightInput.value = String(Math.round(state.map.height));
-    dom.defaultThemeInput.value = state.map.defaultThemeId;
+    dom.defaultThemeInput.value = state.map.theme;
     dom.themePreviewSelect.value = state.themePreviewId;
+    dom.levelEditSelect.value = state.activeLevelId;
+  }
+
+  function syncBrushLabels() {
+    dom.brushSizeLabel.textContent = String(Number(state.brush.size || 3).toFixed(0));
+    dom.brushDensityLabel.textContent = Number(state.brush.density || 0).toFixed(2);
+    dom.brushRandomnessLabel.textContent = Number(state.brush.randomness || 0).toFixed(2);
+    dom.brushSoftnessLabel.textContent = Number(state.brush.softness || 0).toFixed(2);
+  }
+
+  function syncBackgroundControls() {
+    const bg = state.map.backgroundImage || createDefaultBackgroundImage();
+    dom.backgroundOpacityInput.value = String(clamp(Number(bg.opacity || 0.5), 0, 1));
+    dom.backgroundScaleInput.value = String(clamp(Number(bg.scale || 1), 0.2, 3));
+    dom.backgroundOffsetXInput.value = String(Math.round(Number(bg.offsetX || 0)));
+    dom.backgroundOffsetYInput.value = String(Math.round(Number(bg.offsetY || 0)));
+    dom.backgroundOpacityLabel.textContent = Number(dom.backgroundOpacityInput.value).toFixed(2);
+    dom.backgroundScaleLabel.textContent = `${Number(dom.backgroundScaleInput.value).toFixed(2)}x`;
+  }
+
+  function updatePlayAreaSummary() {
+    const count = Array.isArray(state.map.playAreaMask) ? state.map.playAreaMask.length : 0;
+    dom.playAreaSummary.textContent = count ? `Custom play area cells: ${count}` : "No custom play area mask yet (full map fallback).";
+  }
+
+  function updatePlayerStartSummary() {
+    const start = state.map && state.map.playerStart;
+    if (!start || !Number.isFinite(Number(start.x)) || !Number.isFinite(Number(start.y))) {
+      dom.playerStartSummary.textContent = "No player start set. Using map center fallback.";
+      return;
+    }
+    dom.playerStartSummary.textContent = `Player starts at x=${Math.round(start.x)}, y=${Math.round(start.y)}.`;
+  }
+
+  function setPlayerStart(worldPoint) {
+    const point = clampPointToMap(worldPoint);
+    state.map.playerStart = { x: point.x, y: point.y };
+    updatePlayerStartSummary();
+    requestRender();
+  }
+
+  function setTool(tool) {
+    state.tool = tool;
+    state.drag = null;
+    state.stroke = null;
+    Array.from(dom.toolButtons.querySelectorAll("[data-tool]")).forEach((button) => button.classList.toggle("active", button.dataset.tool === tool));
+    setStatus(`Tool changed to ${TOOL_LABELS[tool] || tool}.`);
+    requestRender();
+  }
+
+  function loadIntoState(mapData, options) {
+    const safe = options || {};
+    if (safe.activeLevelId && LEVEL_OPTIONS.some((level) => level.id === safe.activeLevelId)) state.activeLevelId = safe.activeLevelId;
+    state.map = normalizeMapData(mapData);
+    if (state.map.levelId && LEVEL_OPTIONS.some((level) => level.id === state.map.levelId)) state.activeLevelId = state.map.levelId;
+    else state.map.levelId = state.activeLevelId;
+    state.themePreviewId = state.map.theme;
+    state.camera.x = state.map.width * 0.5;
+    state.camera.y = state.map.height * 0.5;
+    state.selectedTerrainId = null;
+    state.stroke = null;
+    state.drag = null;
+    syncMapInputs();
+    syncBrushLabels();
+    syncBackgroundControls();
+    updatePlayAreaSummary();
+    updatePlayerStartSummary();
+    renderSelectionProperties();
+    setValidationSummary([], []);
+    setStatus(`Loaded map "${state.map.name}".`, "success");
+    requestRender();
   }
 
   function saveAsFile() {
@@ -1090,9 +1155,7 @@
     }
   }
 
-  function writeLocalMaps(mapStore) {
-    localStorage.setItem(LOCAL_MAPS_KEY, JSON.stringify(mapStore));
-  }
+  function writeLocalMaps(mapStore) { localStorage.setItem(LOCAL_MAPS_KEY, JSON.stringify(mapStore)); }
 
   function readLevelSlots() {
     try {
@@ -1106,9 +1169,7 @@
     }
   }
 
-  function writeLevelSlots(levelSlots) {
-    localStorage.setItem(LOCAL_LEVEL_SLOTS_KEY, JSON.stringify(levelSlots));
-  }
+  function writeLevelSlots(levelSlots) { localStorage.setItem(LOCAL_LEVEL_SLOTS_KEY, JSON.stringify(levelSlots)); }
 
   function refreshLocalMapSelect() {
     const maps = readLocalMaps();
@@ -1128,6 +1189,14 @@
       option.textContent = `${name} (${id})`;
       dom.localMapSelect.appendChild(option);
     });
+  }
+
+  function saveCurrentMapToActiveLevelSlot() {
+    const slots = readLevelSlots();
+    const payload = toJsonMap();
+    payload.levelId = state.activeLevelId;
+    slots[state.activeLevelId] = payload;
+    writeLevelSlots(slots);
   }
 
   function saveLocalMap() {
@@ -1158,21 +1227,32 @@
     loadIntoState(maps[id]);
   }
 
-  function saveCurrentMapToActiveLevelSlot() {
-    const levelSlots = readLevelSlots();
-    const payload = toJsonMap();
-    payload.levelId = state.activeLevelId;
-    levelSlots[state.activeLevelId] = payload;
-    writeLevelSlots(levelSlots);
+  async function loadBundledLevelTemplate(levelId) {
+    const templatePath = BUNDLED_LEVEL_TEMPLATE_PATHS[levelId];
+    if (!templatePath) return null;
+    try {
+      const response = await fetch(templatePath, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      console.warn(`Failed to load bundled template for ${levelId} from ${templatePath}.`, error);
+      return null;
+    }
   }
 
-  function loadLevelSlot(levelId) {
+  async function loadLevelSlot(levelId) {
     const level = getLevelOption(levelId);
-    const levelSlots = readLevelSlots();
-    const slottedMap = levelSlots[level.id];
+    const slots = readLevelSlots();
+    const slottedMap = slots[level.id];
     if (slottedMap) {
       loadIntoState(slottedMap, { activeLevelId: level.id });
       setStatus(`Loaded saved editor map for ${level.label}.`, "success");
+      return;
+    }
+    const bundledTemplate = await loadBundledLevelTemplate(level.id);
+    if (bundledTemplate) {
+      loadIntoState(bundledTemplate, { activeLevelId: level.id });
+      setStatus(`Loaded ${level.label} template from ${BUNDLED_LEVEL_TEMPLATE_PATHS[level.id]}.`, "success");
       return;
     }
     loadIntoState(createDefaultMap(level.id), { activeLevelId: level.id });
@@ -1184,121 +1264,145 @@
     const warnings = [];
     if (!mapData.id || !String(mapData.id).trim()) errors.push("Map ID is required.");
     if (!mapData.name || !String(mapData.name).trim()) errors.push("Map name is required.");
-    if (Number(mapData.width) < 200 || Number(mapData.height) < 200) {
-      errors.push("Map dimensions must be at least 200 x 200.");
-    }
-
+    if (Number(mapData.width) < 200 || Number(mapData.height) < 200) errors.push("Map dimensions must be at least 200 x 200.");
     const width = Number(mapData.width || 0);
     const height = Number(mapData.height || 0);
-
-    (mapData.terrainObjects || []).forEach((terrain, index) => {
-      if (terrain.x < 0 || terrain.y < 0 || terrain.x > width || terrain.y > height) {
-        errors.push(`Terrain #${index + 1} is outside map bounds.`);
-      }
+    const terrain = Array.isArray(mapData.terrain) ? mapData.terrain : [];
+    terrain.forEach((stamp, index) => {
+      if (stamp.x < 0 || stamp.y < 0 || stamp.x > width || stamp.y > height) errors.push(`Terrain stamp #${index + 1} is outside map bounds.`);
+      if (!TERRAIN_TYPES.some((entry) => entry.id === stamp.terrainType)) errors.push(`Terrain stamp #${index + 1} has invalid terrain type.`);
     });
-
-    (mapData.boundaries || []).forEach((boundary, index) => {
-      if (!Array.isArray(boundary.polygonPoints) || boundary.polygonPoints.length < 3) {
-        errors.push(`Boundary #${index + 1} must have at least 3 points.`);
-        return;
-      }
-      boundary.polygonPoints.forEach((point, pointIndex) => {
-        if (point.x < 0 || point.y < 0 || point.x > width || point.y > height) {
-          errors.push(`Boundary #${index + 1} point #${pointIndex + 1} is outside map bounds.`);
-        }
-      });
+    const mask = Array.isArray(mapData.playAreaMask) ? mapData.playAreaMask : [];
+    mask.forEach((cell, index) => {
+      const world = gridToWorld(Number(cell.gx || 0), Number(cell.gy || 0));
+      if (world.x < 0 || world.y < 0 || world.x > width || world.y > height) errors.push(`Play area cell #${index + 1} is outside map bounds.`);
     });
-
-    (mapData.crossings || []).forEach((crossing, index) => {
-      if (crossing.x < 0 || crossing.y < 0 || crossing.x > width || crossing.y > height) {
-        errors.push(`Crossing #${index + 1} is outside map bounds.`);
-      }
-      const nearest = (() => {
-        let best = Number.POSITIVE_INFINITY;
-        (mapData.boundaries || []).forEach((boundary) => {
-          const points = boundary.polygonPoints || [];
-          for (let i = 0; i < points.length; i += 1) {
-            const a = points[i];
-            const b = points[(i + 1) % points.length];
-            best = Math.min(best, distancePointToSegment(crossing, a, b));
-          }
-        });
-        return best;
-      })();
-      if (!Number.isFinite(nearest) || nearest > Math.max(22, Number(crossing.width || 70) * 0.75)) {
-        errors.push(`Crossing #${index + 1} is not aligned to a boundary edge.`);
-      }
-    });
-
-    if (
-      (!mapData.terrainObjects || !mapData.terrainObjects.length) &&
-      (!mapData.boundaries || !mapData.boundaries.length) &&
-      (!mapData.crossings || !mapData.crossings.length)
+    if (!terrain.length) warnings.push("Map has no painted terrain yet.");
+    if (!mask.length) warnings.push("Play area mask is empty (full-map fallback active).");
+    const playerStart = mapData.playerStart;
+    if (!playerStart || !Number.isFinite(Number(playerStart.x)) || !Number.isFinite(Number(playerStart.y))) {
+      warnings.push("Player start is not set. Map center fallback will be used.");
+    } else if (
+      Number(playerStart.x) < 0 ||
+      Number(playerStart.y) < 0 ||
+      Number(playerStart.x) > width ||
+      Number(playerStart.y) > height
     ) {
-      warnings.push("Map has no placed content yet.");
+      errors.push("Player start is outside map bounds.");
     }
-
-    const sampleCols = 8;
-    const sampleRows = 6;
-    let playableSampleFound = false;
-    for (let row = 0; row < sampleRows; row += 1) {
-      for (let col = 0; col < sampleCols; col += 1) {
-        const sample = {
-          x: ((col + 0.5) / sampleCols) * width,
-          y: ((row + 0.5) / sampleRows) * height
-        };
-        const blocked = (mapData.boundaries || []).some((boundary) => pointInPolygon(sample, boundary.polygonPoints || []));
-        if (!blocked) {
-          playableSampleFound = true;
-          break;
-        }
-      }
-      if (playableSampleFound) break;
-    }
-    if (!playableSampleFound) {
-      errors.push("Map appears to have no playable space outside boundaries.");
-    }
-
     return { errors, warnings };
   }
 
-  function wireTopbarActions() {
-    dom.levelEditSelect.addEventListener("change", () => {
-      const nextLevelId = String(dom.levelEditSelect.value || "").trim();
-      if (!nextLevelId || nextLevelId === state.activeLevelId) return;
-      const currentLevel = getLevelOption(state.activeLevelId);
-      const nextLevel = getLevelOption(nextLevelId);
-      const proceed = window.confirm(
-        `Switch editor context from ${currentLevel.label} to ${nextLevel.label}? Current layout will be auto-saved to its level slot.`
-      );
-      if (!proceed) {
-        dom.levelEditSelect.value = state.activeLevelId;
-        return;
-      }
-      saveCurrentMapToActiveLevelSlot();
-      state.activeLevelId = nextLevel.id;
-      loadLevelSlot(nextLevel.id);
-    });
+  function updateTheme(themeId) {
+    const validTheme = THEMES.some((entry) => entry.id === themeId) ? themeId : THEMES[0].id;
+    state.map.theme = validTheme;
+    state.map.defaultThemeId = validTheme;
+    state.themePreviewId = validTheme;
+    dom.defaultThemeInput.value = validTheme;
+    dom.themePreviewSelect.value = validTheme;
+    requestRender();
+  }
 
+  function startStroke(tool, worldPoint, button) {
+    const clampedPoint = clampPointToMap(worldPoint);
+    const mode =
+      tool === "paint"
+        ? "paint"
+        : tool === "eraser"
+        ? "erase"
+        : tool === "play_area"
+        ? (button === 2 ? "play_remove" : "play_add")
+        : tool === "play_area_rect"
+        ? (button === 2 ? "play_rect_remove" : "play_rect_set")
+        : tool === "river"
+        ? "river"
+        : null;
+    if (!mode) return;
+    pushHistory(`Stroke (${tool})`);
+    state.stroke = { tool, mode, points: [clampedPoint], lastPoint: clampedPoint, startedAt: Date.now() };
+    if (mode === "river" || mode === "play_rect_set" || mode === "play_rect_remove") {
+      requestRender();
+      return;
+    }
+    applyBrushBetween(clampedPoint, clampedPoint, mode);
+    setStatus(`${TOOL_LABELS[tool]} stroke started.`);
+  }
+
+  function continueStroke(worldPoint) {
+    if (!state.stroke) return;
+    const clampedPoint = clampPointToMap(worldPoint);
+    if (state.stroke.mode === "river") {
+      state.stroke.points.push(clampedPoint);
+      state.stroke.lastPoint = clampedPoint;
+      requestRender();
+      return;
+    }
+    if (state.stroke.mode === "play_rect_set" || state.stroke.mode === "play_rect_remove") {
+      state.stroke.lastPoint = clampedPoint;
+      requestRender();
+      return;
+    }
+    applyBrushBetween(state.stroke.lastPoint, clampedPoint, state.stroke.mode);
+    state.stroke.lastPoint = clampedPoint;
+  }
+
+  function finishStroke() {
+    if (!state.stroke) return;
+    const finished = state.stroke;
+    state.stroke = null;
+    if (finished.mode === "river" && finished.points.length >= 2) applyRiverStroke(finished.points);
+    if (finished.mode === "play_rect_set" || finished.mode === "play_rect_remove") {
+      const startPoint = finished.points && finished.points[0] ? finished.points[0] : finished.lastPoint;
+      const endPoint = finished.lastPoint || startPoint;
+      const result = applyPlayAreaRectangle(startPoint, endPoint, finished.mode);
+      if (result.changedCount > 0) {
+        const actionText = finished.mode === "play_rect_remove" ? "removed from" : "set as";
+        setStatus(`Play area rectangle ${actionText} field (${result.minGx},${result.minGy}) to (${result.maxGx},${result.maxGy}).`, "success");
+      } else {
+        setStatus("Play area rectangle made no changes.");
+      }
+    }
+    renderSelectionProperties();
+    updatePlayAreaSummary();
+    requestRender();
+  }
+
+  function deleteAtPoint(worldPoint) {
+    const hit = findTerrainHit(worldPoint);
+    if (!hit) {
+      setStatus("Nothing to delete at this location.");
+      return;
+    }
+    pushHistory("Delete terrain");
+    removeTerrainCell(hit.gx, hit.gy);
+    setStatus("Terrain deleted.", "success");
+    requestRender();
+  }
+
+  function wireTopbarActions() {
+    dom.levelEditSelect.addEventListener("change", async () => {
+      const next = String(dom.levelEditSelect.value || "").trim();
+      if (!next || next === state.activeLevelId) return;
+      saveCurrentMapToActiveLevelSlot();
+      state.activeLevelId = next;
+      await loadLevelSlot(next);
+    });
+    dom.undoBtn.addEventListener("click", undo);
+    dom.redoBtn.addEventListener("click", redo);
     dom.newMapBtn.addEventListener("click", () => {
-      const shouldReset = window.confirm("Create a new map? Unsaved changes in the current map will be lost.");
-      if (!shouldReset) return;
+      pushHistory("New map");
       loadIntoState(createDefaultMap(state.activeLevelId), { activeLevelId: state.activeLevelId });
       setTool("select");
     });
-
-    dom.openFileBtn.addEventListener("click", () => {
-      dom.openFileInput.click();
-    });
-
+    dom.openFileBtn.addEventListener("click", () => dom.openFileInput.click());
     dom.openFileInput.addEventListener("change", (event) => {
       const file = event.target.files && event.target.files[0];
       if (!file) return;
       const reader = new FileReader();
       reader.onload = () => {
         try {
-          const parsed = JSON.parse(String(reader.result || "{}"));
-          loadIntoState(parsed);
+          pushHistory("Open map file");
+          loadIntoState(JSON.parse(String(reader.result || "{}")));
         } catch (error) {
           setStatus("Failed to parse JSON map file.", "error");
         }
@@ -1306,26 +1410,16 @@
       reader.readAsText(file);
       dom.openFileInput.value = "";
     });
-
-    dom.saveFileBtn.addEventListener("click", () => saveAsFile());
-    dom.copyJsonBtn.addEventListener("click", () => {
-      copyJsonToClipboard().catch(() => {
-        setStatus("Could not copy JSON to clipboard.", "error");
-      });
-    });
-
-    dom.saveLocalBtn.addEventListener("click", () => saveLocalMap());
-    dom.loadLocalBtn.addEventListener("click", () => loadSelectedLocalMap());
+    dom.saveFileBtn.addEventListener("click", saveAsFile);
+    dom.copyJsonBtn.addEventListener("click", () => copyJsonToClipboard().catch(() => setStatus("Could not copy JSON to clipboard.", "error")));
+    dom.saveLocalBtn.addEventListener("click", saveLocalMap);
+    dom.loadLocalBtn.addEventListener("click", loadSelectedLocalMap);
     dom.validateBtn.addEventListener("click", () => {
       const validation = validateMapData(toJsonMap());
       setValidationSummary(validation.errors, validation.warnings);
-      if (validation.errors.length) {
-        setStatus(validation.errors[0], "error");
-      } else if (validation.warnings.length) {
-        setStatus(validation.warnings[0]);
-      } else {
-        setStatus("Validation complete: no issues found.", "success");
-      }
+      if (validation.errors.length) setStatus(validation.errors[0], "error");
+      else if (validation.warnings.length) setStatus(validation.warnings[0]);
+      else setStatus("Validation complete: no issues found.", "success");
     });
   }
 
@@ -1336,45 +1430,48 @@
         dom.mapIdInput.value = state.map.id;
         return;
       }
+      pushHistory("Edit map ID");
       state.map.id = next;
       requestRender();
     });
-
-    dom.mapNameInput.addEventListener("input", () => {
-      state.map.name = String(dom.mapNameInput.value || "").slice(0, 80);
-    });
+    dom.mapNameInput.addEventListener("input", () => { state.map.name = String(dom.mapNameInput.value || "").slice(0, 80); });
 
     const resizeMap = () => {
+      pushHistory("Resize map");
       const width = Math.max(200, Number(dom.mapWidthInput.value || state.map.width));
       const height = Math.max(200, Number(dom.mapHeightInput.value || state.map.height));
       state.map.width = width;
       state.map.height = height;
-      state.map.terrainObjects.forEach((terrain) => {
-        terrain.x = clamp(terrain.x, 0, width);
-        terrain.y = clamp(terrain.y, 0, height);
+      state.map.terrain = state.map.terrain.filter((stamp) => {
+        stamp.x = clamp(stamp.x, 0, width);
+        stamp.y = clamp(stamp.y, 0, height);
+        const g = worldToGrid(stamp);
+        stamp.gx = g.gx;
+        stamp.gy = g.gy;
+        stamp.key = terrainKey(stamp.gx, stamp.gy);
+        return stamp.x >= 0 && stamp.y >= 0 && stamp.x <= width && stamp.y <= height;
       });
-      state.map.crossings.forEach((crossing) => {
-        crossing.x = clamp(crossing.x, 0, width);
-        crossing.y = clamp(crossing.y, 0, height);
+      state.map.playAreaMask = state.map.playAreaMask.filter((cell) => {
+        const world = gridToWorld(cell.gx, cell.gy);
+        return world.x >= 0 && world.y >= 0 && world.x <= width && world.y <= height;
       });
-      state.map.boundaries.forEach((boundary) => {
-        boundary.polygonPoints.forEach((point) => {
-          point.x = clamp(point.x, 0, width);
-          point.y = clamp(point.y, 0, height);
-        });
-      });
-      requestRender();
+      if (state.map.playerStart) {
+        state.map.playerStart.x = clamp(Number(state.map.playerStart.x || width * 0.5), 0, width);
+        state.map.playerStart.y = clamp(Number(state.map.playerStart.y || height * 0.5), 0, height);
+      } else {
+        state.map.playerStart = createDefaultPlayerStart(width, height);
+      }
+      updatePlayAreaSummary();
+      updatePlayerStartSummary();
       renderSelectionProperties();
+      requestRender();
     };
 
     dom.mapWidthInput.addEventListener("change", resizeMap);
     dom.mapHeightInput.addEventListener("change", resizeMap);
-
     dom.defaultThemeInput.addEventListener("change", () => {
-      state.map.defaultThemeId = dom.defaultThemeInput.value;
-      state.themePreviewId = dom.defaultThemeInput.value;
-      dom.themePreviewSelect.value = state.themePreviewId;
-      requestRender();
+      pushHistory("Change theme");
+      updateTheme(dom.defaultThemeInput.value);
     });
   }
 
@@ -1384,74 +1481,121 @@
       if (!button) return;
       setTool(button.dataset.tool);
     });
+    dom.terrainTypeSelect.addEventListener("change", () => { state.terrainPlacementType = dom.terrainTypeSelect.value; });
+    dom.themePreviewSelect.addEventListener("change", () => updateTheme(dom.themePreviewSelect.value));
 
-    dom.terrainTypeSelect.addEventListener("change", () => {
-      state.terrainPlacementType = dom.terrainTypeSelect.value;
+    dom.brushSizeInput.addEventListener("input", () => { state.brush.size = clamp(Number(dom.brushSizeInput.value || 3), 1, 10); syncBrushLabels(); requestRender(); });
+    dom.brushDensityInput.addEventListener("input", () => { state.brush.density = clamp(Number(dom.brushDensityInput.value || 0.6), 0.1, 1); syncBrushLabels(); requestRender(); });
+    dom.brushRandomnessInput.addEventListener("input", () => { state.brush.randomness = clamp(Number(dom.brushRandomnessInput.value || 0.35), 0, 1); syncBrushLabels(); requestRender(); });
+    dom.brushSoftnessInput.addEventListener("input", () => { state.brush.softness = clamp(Number(dom.brushSoftnessInput.value || 0.7), 0, 1); syncBrushLabels(); requestRender(); });
+
+    dom.gridVisibleChk.addEventListener("change", () => { state.grid.visible = dom.gridVisibleChk.checked; requestRender(); });
+    dom.gridSizeInput.addEventListener("change", () => { state.grid.size = Math.max(8, Number(dom.gridSizeInput.value || 32)); dom.gridSizeInput.value = String(Math.round(state.grid.size)); requestRender(); });
+
+    dom.layerBackgroundChk.addEventListener("change", () => { state.layerVisibility.background = dom.layerBackgroundChk.checked; requestRender(); });
+    dom.layerTerrainChk.addEventListener("change", () => { state.layerVisibility.terrain = dom.layerTerrainChk.checked; requestRender(); });
+    dom.layerPropsChk.addEventListener("change", () => { state.layerVisibility.props = dom.layerPropsChk.checked; requestRender(); });
+    dom.layerPlayAreaChk.addEventListener("change", () => { state.layerVisibility.playArea = dom.layerPlayAreaChk.checked; requestRender(); });
+    dom.layerCollisionChk.addEventListener("change", () => { state.layerVisibility.collision = dom.layerCollisionChk.checked; requestRender(); });
+
+    dom.importBackgroundBtn.addEventListener("click", () => dom.importBackgroundInput.click());
+    dom.importBackgroundInput.addEventListener("change", (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      if (!file.type || !file.type.startsWith("image/")) {
+        setStatus("Background import only supports PNG/JPG.", "error");
+        dom.importBackgroundInput.value = "";
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        pushHistory("Import background image");
+        state.map.backgroundImage = { src: String(reader.result || ""), opacity: clamp(Number(dom.backgroundOpacityInput.value || 0.5), 0, 1), scale: clamp(Number(dom.backgroundScaleInput.value || 1), 0.2, 3), offsetX: Number(dom.backgroundOffsetXInput.value || 0), offsetY: Number(dom.backgroundOffsetYInput.value || 0) };
+        syncBackgroundControls();
+        requestRender();
+        setStatus("Background image imported.", "success");
+      };
+      reader.readAsDataURL(file);
+      dom.importBackgroundInput.value = "";
     });
 
-    dom.themePreviewSelect.addEventListener("change", () => {
-      state.themePreviewId = dom.themePreviewSelect.value;
+    dom.clearBackgroundBtn.addEventListener("click", () => {
+      if (!state.map.backgroundImage) return;
+      pushHistory("Clear background image");
+      state.map.backgroundImage = null;
+      syncBackgroundControls();
       requestRender();
+      setStatus("Background image removed.", "success");
     });
 
-    dom.gridVisibleChk.addEventListener("change", () => {
-      state.grid.visible = dom.gridVisibleChk.checked;
+    const updateBackground = () => {
+      if (!state.map.backgroundImage) state.map.backgroundImage = createDefaultBackgroundImage();
+      state.map.backgroundImage.opacity = clamp(Number(dom.backgroundOpacityInput.value || 0.5), 0, 1);
+      state.map.backgroundImage.scale = clamp(Number(dom.backgroundScaleInput.value || 1), 0.2, 3);
+      state.map.backgroundImage.offsetX = Number(dom.backgroundOffsetXInput.value || 0);
+      state.map.backgroundImage.offsetY = Number(dom.backgroundOffsetYInput.value || 0);
+      syncBackgroundControls();
       requestRender();
-    });
+    };
 
-    dom.snapEnabledChk.addEventListener("change", () => {
-      state.grid.snap = dom.snapEnabledChk.checked;
-    });
+    dom.backgroundOpacityInput.addEventListener("input", updateBackground);
+    dom.backgroundScaleInput.addEventListener("input", updateBackground);
+    dom.backgroundOffsetXInput.addEventListener("change", updateBackground);
+    dom.backgroundOffsetYInput.addEventListener("change", updateBackground);
 
-    dom.gridSizeInput.addEventListener("change", () => {
-      state.grid.size = Math.max(8, Number(dom.gridSizeInput.value || 32));
-      dom.gridSizeInput.value = String(Math.round(state.grid.size));
+    dom.clearPlayAreaBtn.addEventListener("click", () => {
+      if (!state.map.playAreaMask.length) return;
+      pushHistory("Clear play area mask");
+      state.map.playAreaMask = [];
+      updatePlayAreaSummary();
       requestRender();
+      setStatus("Play area mask cleared.", "success");
+    });
+
+    dom.resetPlayerStartBtn.addEventListener("click", () => {
+      pushHistory("Reset player start");
+      state.map.playerStart = createDefaultPlayerStart(state.map.width, state.map.height);
+      updatePlayerStartSummary();
+      requestRender();
+      setStatus("Player start reset to map center.", "success");
     });
   }
 
   function wireKeyboard() {
     window.addEventListener("keydown", (event) => {
       if (event.code === "Space") state.keyboard.space = true;
-      if (event.ctrlKey || event.metaKey) state.keyboard.ctrl = true;
-
-      if (event.code === "Delete") {
-        deleteSelection();
-      }
+      if (event.code === "Delete") deleteSelection();
       if ((event.ctrlKey || event.metaKey) && event.code === "KeyD") {
         event.preventDefault();
         duplicateSelection();
       }
-
-      if (event.code === "Digit1") setTool("select");
-      if (event.code === "Digit2") setTool("terrain");
-      if (event.code === "Digit3") setTool("boundary");
-      if (event.code === "Digit4") setTool("crossing");
-      if (event.code === "Digit5") setTool("delete");
-
-      if (event.code === "Escape") {
-        cancelBoundaryDraft();
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.code === "KeyZ") {
+        event.preventDefault();
+        undo();
       }
-      if (event.code === "Enter" && state.tool === "boundary" && state.boundaryDraft.length >= 3) {
-        finalizeBoundaryDraft();
+      if (((event.ctrlKey || event.metaKey) && event.code === "KeyY") || ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === "KeyZ")) {
+        event.preventDefault();
+        redo();
+      }
+      if (event.code === "Digit1") setTool("select");
+      if (event.code === "Digit2") setTool("paint");
+      if (event.code === "Digit3") setTool("river");
+      if (event.code === "Digit4") setTool("play_area");
+      if (event.code === "Digit5") setTool("player_start");
+      if (event.code === "Digit6") setTool("eraser");
+      if (event.code === "Digit7") setTool("play_area_rect");
+      if (event.code === "Escape") {
+        state.stroke = null;
+        requestRender();
       }
     });
-
     window.addEventListener("keyup", (event) => {
       if (event.code === "Space") state.keyboard.space = false;
-      state.keyboard.ctrl = event.ctrlKey || event.metaKey;
     });
   }
 
   function wireCanvas() {
-    dom.canvas.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      if (state.tool === "boundary" && state.boundaryDraft.length) {
-        state.boundaryDraft.pop();
-        requestRender();
-        setStatus("Removed last boundary draft point.");
-      }
-    });
+    dom.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
     dom.canvas.addEventListener("wheel", (event) => {
       event.preventDefault();
@@ -1472,74 +1616,39 @@
 
       const shouldPan = event.button === 1 || (event.button === 0 && state.keyboard.space);
       if (shouldPan) {
-        state.drag = {
-          mode: "pan",
-          startScreen: canvasPoint,
-          cameraStart: { x: state.camera.x, y: state.camera.y }
-        };
+        state.drag = { mode: "pan", startScreen: canvasPoint, cameraStart: { x: state.camera.x, y: state.camera.y } };
         return;
+      }
+
+      if (event.button === 0 || event.button === 2) {
+        if (state.tool === "paint" || state.tool === "eraser" || state.tool === "play_area" || state.tool === "play_area_rect" || state.tool === "river") {
+          startStroke(state.tool, worldPoint, event.button);
+          return;
+        }
+        if (state.tool === "player_start" && event.button === 0) {
+          pushHistory("Set player start");
+          setPlayerStart(worldPoint);
+          setStatus("Player start point set.", "success");
+          return;
+        }
       }
 
       if (event.button !== 0) return;
 
-      if (state.tool === "terrain") {
-        placeTerrain(worldPoint);
-        return;
-      }
-      if (state.tool === "crossing") {
-        placeCrossing(worldPoint);
-        return;
-      }
-      if (state.tool === "delete") {
-        deleteAtPoint(worldPoint);
-        return;
-      }
-      if (state.tool === "boundary") {
-        beginBoundaryDraftPoint(worldPoint);
-        return;
-      }
-
-      const hit = getHitTarget(worldPoint);
-      if (!hit) {
-        clearSelection();
+      if (state.tool === "select") {
+        const hit = findTerrainHit(worldPoint);
+        if (!hit) {
+          clearSelection();
+          requestRender();
+          return;
+        }
+        setSelection(hit);
+        state.drag = { mode: "moveStamp", stampId: hit.id, startWorld: worldPoint, startPos: { x: hit.x, y: hit.y } };
         requestRender();
         return;
       }
-      setSelection(hit);
 
-      if (hit.kind === "terrain" || hit.kind === "crossing") {
-        const selected = findSelectedObject();
-        if (!selected) return;
-        state.drag = {
-          mode: "moveObject",
-          objectKind: hit.kind,
-          objectId: hit.id,
-          startWorld: worldPoint,
-          objectStart: { x: selected.x, y: selected.y }
-        };
-      } else if (hit.kind === "boundary" && Number.isInteger(hit.vertexIndex)) {
-        state.drag = {
-          mode: "moveBoundaryVertex",
-          boundaryId: hit.id,
-          vertexIndex: hit.vertexIndex
-        };
-      } else if (hit.kind === "boundary") {
-        const boundary = findSelectedObject();
-        if (!boundary) return;
-        state.drag = {
-          mode: "moveBoundary",
-          boundaryId: hit.id,
-          startWorld: worldPoint,
-          pointsStart: boundary.polygonPoints.map((point) => ({ x: point.x, y: point.y }))
-        };
-      }
-    });
-
-    dom.canvas.addEventListener("dblclick", () => {
-      if (state.tool !== "boundary") return;
-      if (state.boundaryDraft.length >= 3) {
-        finalizeBoundaryDraft();
-      }
+      if (state.tool === "eraser") deleteAtPoint(worldPoint);
     });
 
     dom.canvas.addEventListener("mousemove", (event) => {
@@ -1547,12 +1656,7 @@
       const worldPoint = screenToWorld(canvasPoint);
       state.hoverWorld = worldPoint;
 
-      if (!state.drag) {
-        requestRender();
-        return;
-      }
-
-      if (state.drag.mode === "pan") {
+      if (state.drag && state.drag.mode === "pan") {
         const dx = canvasPoint.x - state.drag.startScreen.x;
         const dy = canvasPoint.y - state.drag.startScreen.y;
         state.camera.x = state.drag.cameraStart.x - dx / state.camera.zoom;
@@ -1561,52 +1665,35 @@
         return;
       }
 
-      if (state.drag.mode === "moveObject") {
-        const objectArray = state.drag.objectKind === "terrain" ? state.map.terrainObjects : state.map.crossings;
-        const object = objectArray.find((entry) => entry.id === state.drag.objectId);
-        if (!object) return;
+      if (state.drag && state.drag.mode === "moveStamp") {
+        const stamp = findTerrainStampById(state.drag.stampId);
+        if (!stamp) return;
         const dx = worldPoint.x - state.drag.startWorld.x;
         const dy = worldPoint.y - state.drag.startWorld.y;
-        object.x = clamp(snapValue(state.drag.objectStart.x + dx), 0, state.map.width);
-        object.y = clamp(snapValue(state.drag.objectStart.y + dy), 0, state.map.height);
+        const next = clampPointToMap({ x: state.drag.startPos.x + dx, y: state.drag.startPos.y + dy });
+        stamp.x = next.x;
+        stamp.y = next.y;
+        const g = worldToGrid(next);
+        stamp.gx = g.gx;
+        stamp.gy = g.gy;
+        stamp.key = terrainKey(stamp.gx, stamp.gy);
         renderSelectionProperties();
         requestRender();
         return;
       }
 
-      if (state.drag.mode === "moveBoundaryVertex") {
-        const boundary = state.map.boundaries.find((entry) => entry.id === state.drag.boundaryId);
-        if (!boundary) return;
-        const point = boundary.polygonPoints[state.drag.vertexIndex];
-        if (!point) return;
-        point.x = clamp(snapValue(worldPoint.x), 0, state.map.width);
-        point.y = clamp(snapValue(worldPoint.y), 0, state.map.height);
-        state.selected = { kind: "boundary", id: boundary.id, vertexIndex: state.drag.vertexIndex };
-        renderSelectionProperties();
-        requestRender();
+      if (state.stroke) {
+        continueStroke(worldPoint);
         return;
       }
 
-      if (state.drag.mode === "moveBoundary") {
-        const boundary = state.map.boundaries.find((entry) => entry.id === state.drag.boundaryId);
-        if (!boundary) return;
-        const dx = worldPoint.x - state.drag.startWorld.x;
-        const dy = worldPoint.y - state.drag.startWorld.y;
-        boundary.polygonPoints.forEach((point, index) => {
-          const start = state.drag.pointsStart[index];
-          point.x = clamp(snapValue(start.x + dx), 0, state.map.width);
-          point.y = clamp(snapValue(start.y + dy), 0, state.map.height);
-        });
-        renderSelectionProperties();
-        requestRender();
-      }
+      requestRender();
     });
 
     window.addEventListener("mouseup", () => {
-      if (state.drag && state.drag.mode !== "pan") {
-        setStatus("Object updated.", "success");
-      }
+      if (state.drag && state.drag.mode !== "pan") setStatus("Selection updated.", "success");
       state.drag = null;
+      finishStroke();
     });
   }
 
@@ -1632,29 +1719,39 @@
       previewOption.value = theme.id;
       previewOption.textContent = theme.label;
       dom.themePreviewSelect.appendChild(previewOption);
-
       const defaultOption = document.createElement("option");
       defaultOption.value = theme.id;
       defaultOption.textContent = theme.label;
       dom.defaultThemeInput.appendChild(defaultOption);
     });
+
     dom.themePreviewSelect.value = state.themePreviewId;
-    dom.defaultThemeInput.value = state.map.defaultThemeId;
+    dom.defaultThemeInput.value = state.themePreviewId;
+    dom.gridVisibleChk.checked = true;
+    dom.layerBackgroundChk.checked = true;
+    dom.layerTerrainChk.checked = true;
+    dom.layerPropsChk.checked = true;
+    dom.layerPlayAreaChk.checked = true;
+    dom.layerCollisionChk.checked = true;
+    syncBrushLabels();
   }
 
-  function init() {
+  async function init() {
     bootstrapSelects();
     wireTopbarActions();
     wireMetadataInputs();
     wireToolInputs();
     wireKeyboard();
     wireCanvas();
+    state.map = createDefaultMap(state.activeLevelId);
+    await loadLevelSlot(state.activeLevelId);
     refreshLocalMapSelect();
-    loadLevelSlot(state.activeLevelId);
+    dom.undoBtn.disabled = true;
+    dom.redoBtn.disabled = true;
     requestRender();
     renderLoop();
     window.addEventListener("resize", () => requestRender());
-    setStatus("Map editor ready. Start placing terrain, boundaries, and crossings.", "success");
+    setStatus("Map editor ready. Paint terrain, mask play area, and trace from an imported background.", "success");
   }
 
   init();

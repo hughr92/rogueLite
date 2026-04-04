@@ -436,19 +436,75 @@
 
   function normalizeItem(item) {
     if (!item || typeof item !== "object") return null;
-    const { mastery: rawMastery, ...restItem } = item;
-    const allowedSlots = getAllowedSlotsForItem(item);
-    const weaponSlotWeight = getNormalizedWeaponSlotWeight(item.itemType, item.weaponSlotWeight);
+    const definitionId =
+      typeof item.templateId === "string" && item.templateId.trim().length
+        ? item.templateId.trim()
+        : "";
+    const definition =
+      definitionId && Object.prototype.hasOwnProperty.call(ITEM_DEFINITIONS, definitionId)
+        ? ITEM_DEFINITIONS[definitionId]
+        : null;
+
+    const itemType = String((definition && definition.itemType) || item.itemType || item.type || "").trim();
+    if (!itemType) return null;
+
+    const preferredAllowedSlots = Array.isArray(item.allowedSlots)
+      ? item.allowedSlots
+      : Array.isArray(definition && definition.allowedSlots)
+      ? definition.allowedSlots
+      : typeof item.allowedSlot === "string"
+      ? [item.allowedSlot]
+      : typeof definition?.allowedSlot === "string"
+      ? [definition.allowedSlot]
+      : [];
+
+    const normalizedStats = {
+      ...normalizeItemStats(definition && definition.stats),
+      ...normalizeItemStats(item.stats)
+    };
+
+    const sourceItem = {
+      ...item,
+      templateId: definitionId || item.templateId || null,
+      name: item.name || (definition && definition.name) || "Item",
+      rarity: item.rarity || (definition && definition.rarity) || "grey",
+      itemType,
+      itemCategory:
+        item.itemCategory || (definition && definition.itemCategory) || null,
+      weaponCategory:
+        item.weaponCategory || (definition && definition.weaponCategory) || null,
+      physicalDamageType:
+        item.physicalDamageType || (definition && definition.physicalDamageType) || null,
+      itemLevel: Math.max(
+        1,
+        Math.floor(Number(item.itemLevel || (definition && definition.itemLevel) || 1))
+      ),
+      allowedSlots: preferredAllowedSlots,
+      allowedSlot:
+        typeof item.allowedSlot === "string" && item.allowedSlot.trim().length
+          ? item.allowedSlot
+          : typeof definition?.allowedSlot === "string" && definition.allowedSlot.trim().length
+          ? definition.allowedSlot
+          : null,
+      stats: normalizedStats
+    };
+
+    const { mastery: rawMastery, ...restItem } = sourceItem;
+    const allowedSlots = getAllowedSlotsForItem(sourceItem);
+    const weaponSlotWeight = getNormalizedWeaponSlotWeight(
+      sourceItem.itemType,
+      sourceItem.weaponSlotWeight || (definition && definition.weaponSlotWeight)
+    );
     const normalized = {
       ...restItem,
       allowedSlots,
       allowedSlot: allowedSlots[0] || null,
       weaponSlotWeight,
-      itemCategory: item.itemCategory || null,
-      weaponCategory: item.weaponCategory || null,
-      physicalDamageType: item.physicalDamageType || null,
+      itemCategory: sourceItem.itemCategory || null,
+      weaponCategory: sourceItem.weaponCategory || null,
+      physicalDamageType: sourceItem.physicalDamageType || null,
       merchantXpEligible: item.merchantXpEligible !== false,
-      stats: normalizeItemStats(item.stats)
+      stats: normalizedStats
     };
     if (isWeaponItemType(normalized.itemType)) {
       normalized.mastery = normalizeWeaponMasteryState(rawMastery, normalized.rarity);
@@ -993,6 +1049,16 @@
       const itemLevel = Number.isNaN(Number(definition.itemLevel)) ? 1 : Math.max(1, Math.floor(definition.itemLevel));
       return itemLevel >= minItemLevel && itemLevel <= maxItemLevel;
     });
+  }
+
+  function getMerchantCatalogVersion(classId, progressionLevel) {
+    const definitions = getEligibleMerchantItemDefinitions(classId, progressionLevel);
+    if (!definitions.length) return "empty";
+    const ids = definitions
+      .map((definition) => String(definition && definition.id ? definition.id : "").trim())
+      .filter((id) => id.length > 0)
+      .sort();
+    return ids.join("|");
   }
 
   function chooseWeightedRarityForPool(pool, rarityWeights, randomFn) {
@@ -1615,6 +1681,12 @@
     const dedupedStock = dedupeMerchantStockByTemplate(filteredStock, inventorySize);
     const hasDuplicatesInStock = dedupedStock.length < filteredStock.length;
     const hasFullPersistedStock = filteredStock.length >= inventorySize;
+    const merchantCatalogVersion = getMerchantCatalogVersion(classId, merchantLevel);
+    const persistedCatalogVersion =
+      rawMerchant && typeof rawMerchant.catalogVersion === "string"
+        ? rawMerchant.catalogVersion
+        : "";
+    const catalogMismatch = persistedCatalogVersion !== merchantCatalogVersion;
     const definitions = getEligibleMerchantItemDefinitions(classId, merchantLevel);
     const varietyGroups = buildMerchantVarietyGroups(definitions, getMerchantClassRule(classId));
     const expectedVarietyCoverage = Math.min(varietyGroups.length, inventorySize);
@@ -1642,6 +1714,7 @@
 
     const initializedStock =
       !hasPersistedStock ||
+      catalogMismatch ||
       (rawStock.length > 0 && filteredStock.length === 0) ||
       (hasFullPersistedStock && (hasDuplicatesInStock || lacksVariety || needsReviveListing || needsHealthPotionListing))
         ? generateMerchantStock(classId, characterId, merchantLevel, inventorySize, {
@@ -1681,6 +1754,7 @@
       refreshRuns,
       inventorySize,
       runsSinceRefresh,
+      catalogVersion: merchantCatalogVersion,
       stock: initializedStock,
       buyback,
       lastRefreshAt: (rawMerchant && rawMerchant.lastRefreshAt) || nowIso()
@@ -1816,8 +1890,35 @@
     const target = findFirstEmptyStorageLocation(inventory);
     if (!target) return null;
     if (!Array.isArray(inventory.storageTabs[target.tabId])) return null;
-    inventory.storageTabs[target.tabId][target.index] = normalizeItem(item);
+    const normalizedItem = normalizeItem(item);
+    if (!normalizedItem) return null;
+    inventory.storageTabs[target.tabId][target.index] = normalizedItem;
     return target;
+  }
+
+  function createPurchasableItemFromMerchantListing(listing, ownerCharacterId) {
+    if (!listing || typeof listing !== "object") return null;
+    const ownerId = ownerCharacterId || null;
+    const rawItem = listing.item && typeof listing.item === "object" ? listing.item : null;
+    const itemFromListing = normalizeItem({
+      ...(rawItem || {}),
+      ownerCharacterId: ownerId
+    });
+    if (itemFromListing) {
+      return itemFromListing;
+    }
+
+    const templateId =
+      String(
+        (rawItem && rawItem.templateId) ||
+          listing.templateId ||
+          (rawItem && rawItem.id) ||
+          listing.itemDefinitionId ||
+          ""
+      ).trim();
+    if (!templateId) return null;
+    const fallback = createItemInstance(templateId, ownerId);
+    return fallback ? normalizeItem(fallback) : null;
   }
 
   function isValidInventoryLocation(location, inventory) {
@@ -2905,10 +3006,7 @@
             type: "consumable_health_potion"
           };
         } else {
-          const purchasedItem = normalizeItem({
-            ...(listing.item || {}),
-            ownerCharacterId: current.id
-          });
+          const purchasedItem = createPurchasableItemFromMerchantListing(listing, current.id);
           if (!purchasedItem) {
             throw new Error("Could not purchase this item.");
           }
@@ -3299,6 +3397,7 @@
     if (!item) {
       return { ok: false, error: "Invalid item data." };
     }
+    let insertedLocation = null;
     try {
       const updated = updateCharacter(characterId, (current) => {
         const inventory = cloneInventory(current.inventory);
@@ -3306,7 +3405,7 @@
           ...item,
           ownerCharacterId: current.id
         };
-        const insertedLocation = insertItemIntoFirstStorageSlot(inventory, itemWithOwner);
+        insertedLocation = insertItemIntoFirstStorageSlot(inventory, itemWithOwner);
         if (!insertedLocation) {
           throw new Error("Storage is full.");
         }
@@ -3316,7 +3415,7 @@
       if (!updated) {
         return { ok: false, error: "Character not found." };
       }
-      return { ok: true, character: updated };
+      return { ok: true, character: updated, storageLocation: insertedLocation };
     } catch (error) {
       return {
         ok: false,

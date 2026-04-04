@@ -2197,13 +2197,42 @@ input {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.health-hud {
+.xp-hud {
   position: absolute;
-  bottom: 5.6rem;
+  top: 3.05rem;
   left: 50%;
   transform: translateX(-50%);
   width: min(420px, 58vw);
-  z-index: 4;
+  z-index: 7;
+  pointer-events: none;
+  display: grid;
+  gap: 0.22rem;
+}
+
+.xp-hud-label {
+  justify-self: end;
+  font-size: 0.78rem;
+  color: #d7e9ff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.xp-hud .xp-track {
+  width: 100%;
+  height: 16px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid #2f5f96;
+  background: rgba(10, 20, 36, 0.86);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset;
+}
+
+.health-hud {
+  position: absolute;
+  bottom: 6.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, 58vw);
+  z-index: 7;
   pointer-events: none;
   display: grid;
   gap: 0.28rem;
@@ -2216,11 +2245,19 @@ input {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
+.health-track-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.55rem;
+}
+
 .health-potion-hud-label {
-  justify-self: end;
+  justify-self: start;
   font-size: 0.77rem;
   color: #ffe3a6;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
 }
 
 .class-skill-hud {
@@ -2228,7 +2265,8 @@ input {
   left: 50%;
   bottom: 0.72rem;
   transform: translateX(-50%);
-  width: min(760px, 96vw);
+  width: fit-content;
+  max-width: 96vw;
   z-index: 5;
   pointer-events: none;
 }
@@ -2237,8 +2275,10 @@ input {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 0.45rem;
+  width: fit-content;
+  max-width: 100%;
+  gap: 7px;
+  padding: 0.4rem;
   border-radius: 11px;
   border: 1px solid #614b2e;
   background: linear-gradient(180deg, rgba(34, 28, 21, 0.88) 0%, rgba(14, 12, 10, 0.95) 100%);
@@ -2248,8 +2288,8 @@ input {
 
 .skill-item {
   position: relative;
-  width: 72px;
-  height: 72px;
+  width: 65px;
+  height: 65px;
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid #504336;
@@ -2308,7 +2348,7 @@ input {
 .keybind-label {
   position: absolute;
   left: 4px;
-  bottom: 4px;
+  bottom: 3px;
   padding: 0.06rem 0.3rem;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.68);
@@ -2474,6 +2514,13 @@ input {
   overflow: hidden;
   border: 1px solid #5a4a58;
   background: rgba(14, 9, 16, 0.8);
+}
+
+.health-hud .rage-track {
+  width: 100%;
+  height: 5px;
+  border-color: #6d3f4f;
+  background: rgba(20, 11, 16, 0.82);
 }
 
 .rage-fill {
@@ -2670,20 +2717,34 @@ input {
   }
 
   .health-hud {
-    bottom: 6.2rem;
+    bottom: 6.8rem;
     left: 50%;
     transform: translateX(-50%);
     width: min(360px, 82vw);
   }
 
+  .xp-hud {
+    top: 2.8rem;
+    width: min(360px, 82vw);
+  }
+
+  .health-track-row {
+    gap: 0.45rem;
+  }
+
+  .health-potion-hud-label {
+    font-size: 0.72rem;
+  }
+
   .class-skill-hud {
     bottom: 0.52rem;
-    width: min(740px, 98vw);
+    width: fit-content;
+    max-width: 98vw;
   }
 
   .skill-item {
-    width: 64px;
-    height: 64px;
+    width: 58px;
+    height: 58px;
   }
 
   .skill-name {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RL Map Editor (MVP)</title>
+  <title>RL Map Editor (V1)</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,13 +11,15 @@
     <header class="topbar">
       <div class="topbar-title">
         <h1>Map Editor</h1>
-        <p>Standalone layout tool for intentional level design</p>
+        <p>Theme-aware brush workflow for fast level authoring</p>
       </div>
       <div class="topbar-actions">
         <a href="../index.html" class="btn topbar-link">Tools</a>
         <a href="../sprite-builder/index.html" class="btn topbar-link">Sprite Builder</a>
         <label for="levelEditSelect" class="topbar-inline-label">Editing Level</label>
         <select id="levelEditSelect" class="input level-edit-select"></select>
+        <button id="undoBtn" class="btn">Undo</button>
+        <button id="redoBtn" class="btn">Redo</button>
         <button id="newMapBtn" class="btn">New</button>
         <button id="openFileBtn" class="btn">Open File</button>
         <input id="openFileInput" class="hidden" type="file" accept="application/json,.json">
@@ -32,13 +34,15 @@
 
     <div class="workspace">
       <aside class="left-panel panel">
-        <h2>Tools</h2>
+        <h2>Brush Tools</h2>
         <div class="tool-grid" id="toolButtons">
           <button data-tool="select" class="btn tool-btn active">Select</button>
-          <button data-tool="terrain" class="btn tool-btn">Terrain</button>
-          <button data-tool="boundary" class="btn tool-btn">Boundary</button>
-          <button data-tool="crossing" class="btn tool-btn">Crossing</button>
-          <button data-tool="delete" class="btn tool-btn">Delete</button>
+          <button data-tool="paint" class="btn tool-btn">Paint</button>
+          <button data-tool="river" class="btn tool-btn">River/Path</button>
+          <button data-tool="play_area" class="btn tool-btn">Play Area</button>
+          <button data-tool="play_area_rect" class="btn tool-btn">Play Area Rect</button>
+          <button data-tool="player_start" class="btn tool-btn">Player Start</button>
+          <button data-tool="eraser" class="btn tool-btn">Eraser</button>
         </div>
 
         <div class="field-block">
@@ -47,15 +51,52 @@
         </div>
 
         <div class="field-block">
-          <label for="themePreviewSelect">Theme Preview</label>
+          <label for="themePreviewSelect">Theme</label>
           <select id="themePreviewSelect" class="input"></select>
         </div>
 
+        <div class="field-block">
+          <label for="brushSizeInput">Brush Size</label>
+          <input id="brushSizeInput" class="input" type="range" min="1" max="10" step="1" value="3">
+          <div id="brushSizeLabel" class="slider-value">3</div>
+        </div>
+
+        <div class="field-block">
+          <label for="brushDensityInput">Brush Density</label>
+          <input id="brushDensityInput" class="input" type="range" min="0.1" max="1" step="0.05" value="0.6">
+          <div id="brushDensityLabel" class="slider-value">0.60</div>
+        </div>
+
+        <div class="field-block">
+          <label for="brushRandomnessInput">Randomness</label>
+          <input id="brushRandomnessInput" class="input" type="range" min="0" max="1" step="0.05" value="0.35">
+          <div id="brushRandomnessLabel" class="slider-value">0.35</div>
+        </div>
+
+        <div class="field-block">
+          <label for="brushSoftnessInput">Softness</label>
+          <input id="brushSoftnessInput" class="input" type="range" min="0" max="1" step="0.05" value="0.7">
+          <div id="brushSoftnessLabel" class="slider-value">0.70</div>
+        </div>
+
+        <h2>Layers</h2>
         <div class="row">
-          <label><input type="checkbox" id="gridVisibleChk" checked> Show Grid</label>
+          <label><input type="checkbox" id="gridVisibleChk" checked> Grid</label>
         </div>
         <div class="row">
-          <label><input type="checkbox" id="snapEnabledChk"> Snap To Grid</label>
+          <label><input type="checkbox" id="layerBackgroundChk" checked> Background</label>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="layerTerrainChk" checked> Terrain</label>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="layerPropsChk" checked> Props</label>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="layerPlayAreaChk" checked> Play Area Overlay</label>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="layerCollisionChk" checked> Collision/Walls</label>
         </div>
 
         <div class="field-block compact">
@@ -63,13 +104,46 @@
           <input id="gridSizeInput" class="input" type="number" min="8" step="1" value="32">
         </div>
 
+        <h2>Background Guide</h2>
+        <div class="field-block">
+          <button id="importBackgroundBtn" class="btn">Import Background</button>
+          <input id="importBackgroundInput" class="hidden" type="file" accept="image/png,image/jpeg,image/jpg">
+          <button id="clearBackgroundBtn" class="btn">Clear Background</button>
+        </div>
+
+        <div class="field-block">
+          <label for="backgroundOpacityInput">Background Opacity</label>
+          <input id="backgroundOpacityInput" class="input" type="range" min="0" max="1" step="0.05" value="0.5">
+          <div id="backgroundOpacityLabel" class="slider-value">0.50</div>
+        </div>
+
+        <div class="field-block">
+          <label for="backgroundScaleInput">Background Scale</label>
+          <input id="backgroundScaleInput" class="input" type="range" min="0.2" max="3" step="0.05" value="1">
+          <div id="backgroundScaleLabel" class="slider-value">1.00x</div>
+        </div>
+
+        <div class="selection-row">
+          <div class="field-block compact">
+            <label for="backgroundOffsetXInput">Background Offset X</label>
+            <input id="backgroundOffsetXInput" class="input" type="number" step="1" value="0">
+          </div>
+          <div class="field-block compact">
+            <label for="backgroundOffsetYInput">Background Offset Y</label>
+            <input id="backgroundOffsetYInput" class="input" type="number" step="1" value="0">
+          </div>
+        </div>
+
         <div class="help-block">
           <h3>Canvas Controls</h3>
+          <p><strong>Paint:</strong> click-drag</p>
+          <p><strong>Eraser:</strong> click-drag</p>
+          <p><strong>Play Area:</strong> left adds, right removes</p>
+          <p><strong>Play Area Rect:</strong> click-drag rectangle (left sets full field, right removes)</p>
+          <p><strong>Player Start:</strong> click to place the run start ping</p>
           <p><strong>Pan:</strong> middle mouse drag or hold <code>Space</code> + drag</p>
           <p><strong>Zoom:</strong> mouse wheel</p>
-          <p><strong>Duplicate:</strong> <code>Ctrl + D</code></p>
-          <p><strong>Delete:</strong> <code>Delete</code> key</p>
-          <p><strong>Boundary:</strong> click points, double-click to finish</p>
+          <p><strong>Undo/Redo:</strong> <code>Ctrl+Z</code> / <code>Ctrl+Y</code></p>
         </div>
       </aside>
 
@@ -83,7 +157,7 @@
       </section>
 
       <aside class="right-panel panel">
-        <h2>Properties</h2>
+        <h2>Map</h2>
         <div class="field-block">
           <label for="mapIdInput">Map ID</label>
           <input id="mapIdInput" class="input" type="text">
@@ -92,21 +166,38 @@
           <label for="mapNameInput">Map Name</label>
           <input id="mapNameInput" class="input" type="text">
         </div>
-        <div class="field-block compact">
-          <label for="mapWidthInput">Map Width</label>
-          <input id="mapWidthInput" class="input" type="number" min="200" step="10">
-        </div>
-        <div class="field-block compact">
-          <label for="mapHeightInput">Map Height</label>
-          <input id="mapHeightInput" class="input" type="number" min="200" step="10">
+        <div class="selection-row">
+          <div class="field-block compact">
+            <label for="mapWidthInput">Map Width</label>
+            <input id="mapWidthInput" class="input" type="number" min="200" step="10">
+          </div>
+          <div class="field-block compact">
+            <label for="mapHeightInput">Map Height</label>
+            <input id="mapHeightInput" class="input" type="number" min="200" step="10">
+          </div>
         </div>
         <div class="field-block">
           <label for="defaultThemeInput">Default Theme</label>
           <select id="defaultThemeInput" class="input"></select>
         </div>
+
         <hr>
+
+        <h2>Play Area</h2>
+        <p class="muted" id="playAreaSummary">No custom play area mask yet (full map fallback).</p>
+        <button id="clearPlayAreaBtn" class="btn">Clear Play Area Mask</button>
+
+        <hr>
+
+        <h2>Player Start</h2>
+        <p class="muted" id="playerStartSummary">Using default center start.</p>
+        <button id="resetPlayerStartBtn" class="btn">Reset Player Start To Center</button>
+
+        <hr>
+
+        <h2>Selection</h2>
         <div id="selectionProperties" class="selection-properties">
-          <p class="muted">Select an object to edit position, type, and dimensions.</p>
+          <p class="muted">Select terrain with the Select tool to inspect/edit a stamp.</p>
         </div>
       </aside>
     </div>

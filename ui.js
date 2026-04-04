@@ -85,8 +85,8 @@
     trishot: "images/enemies/ranged_volley_caster/1_volley_shaman/base/placeholder.png",
     shieldbearer: "images/enemies/melee_tank/1_bulwark/base/skeleton_bulwark_top_shield.png",
     dasher: "images/enemies/melee_charge/1_lancer/base/skeleton_lancer_top.png",
-    miniboss: "images/enemies/elite_leader/1_war_captain/base/placeholder.png",
-    finalBoss: "images/enemies/boss_final/1_abyss_tyrant/base/placeholder.png"
+    miniboss: "images/enemies/elite_leader/1_war_captain/base/skeleton_war_captain_top.png",
+    finalBoss: "images/enemies/boss_final/1_abyss_tyrant/base/skeleton_abyss_tyrant_top.png"
   });
   const SKILL_ICON_PATH_BY_ID = Object.freeze({
     ground_slam: "assets/skills/class/barbarian/ground_slam.png",
@@ -106,6 +106,15 @@
     javelin_volley: "assets/skills/weapon/javelin/volley.jpg",
     javelin_long_flight: "assets/skills/weapon/javelin/piercing_throw.png",
     javelin_piercing_volley: "assets/skills/weapon/javelin/explosive_vollery.jpg",
+    sword_flurry_strikes: "assets/skills/weapon/sword/twin_slash.png",
+    sword_hemorrhage_edge: "assets/skills/class/barbarian/sever_artery.jpg",
+    sword_bladestorm_oath: "assets/skills/weapon/sword/twin_slash.png",
+    hammer_crushing_impact: "assets/skills/weapon/shield/shield_bash.png",
+    hammer_seismic_pulse: "assets/skills/weapon/shield/fortify.png",
+    hammer_worldbreaker: "assets/skills/weapon/shield/shield_bash.png",
+    slingshot_rapid_pebbles: "assets/skills/weapon/bow/volley.png",
+    slingshot_shatterstone: "assets/skills/weapon/bow/power_shot.png",
+    slingshot_meteor_barrage: "assets/skills/weapon/javelin/explosive_vollery.jpg",
     twin_slash: "assets/skills/weapon/sword/twin_slash.png",
     piercing_throw: "assets/skills/weapon/javelin/piercing_throw.png",
     power_shot: "assets/skills/weapon/bow/power_shot.png",
@@ -181,6 +190,42 @@
     const id = String(enemyTypeId || "").trim();
     if (!id) return "";
     return BESTIARY_ENEMY_ICON_PATH_BY_TYPE[id] || "";
+  }
+
+  function inferWeaponSkillIdFromItem(item) {
+    if (!item || typeof item !== "object") return "";
+    const candidates = [item.templateId, item.id, item.name]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter((value) => value.length > 0);
+    if (!candidates.length) return "";
+    const hasToken = (token) => candidates.some((candidate) => candidate.includes(token));
+    if (hasToken("slingshot")) return "slingshot";
+    if (hasToken("javelin")) return "javelin";
+    if (hasToken("light_hammer") || hasToken("great_hammer") || hasToken("hammer")) return "hammer";
+    if (hasToken("rapier") || hasToken("sword")) return "sword";
+    if (hasToken("axe")) return "axe";
+    return "";
+  }
+
+  function getEquippedWeaponSkillIds(character) {
+    const equipment =
+      character &&
+      character.inventory &&
+      character.inventory.equipment &&
+      typeof character.inventory.equipment === "object"
+        ? character.inventory.equipment
+        : {};
+    const slots = ["primaryMeleeWeapon", "secondaryMeleeWeapon", "rangedWeapon"];
+    const unique = {};
+    const ids = [];
+    slots.forEach((slotKey) => {
+      const item = equipment[slotKey];
+      const weaponId = inferWeaponSkillIdFromItem(item);
+      if (!weaponId || unique[weaponId]) return;
+      unique[weaponId] = true;
+      ids.push(weaponId);
+    });
+    return ids;
   }
 
   function createItemIcon(path, altText, className) {
@@ -288,6 +333,7 @@
       hudName: byId("hudName"),
       hudHp: byId("hudHp"),
       healthHudLabel: byId("healthHudLabel"),
+      xpHudLabel: byId("xpHudLabel"),
       healthFill: byId("healthFill"),
       healthPotionHudLabel: byId("healthPotionHudLabel"),
       classSkillHud: byId("classSkillHud"),
@@ -1135,24 +1181,50 @@
       } else if (state.activeSkillTab === "bestiary") {
         renderBestiaryTab(state.selectedCharacter);
       } else {
-        renderWeaponsTab(treeDefinition.weapons);
+        renderWeaponsTab(treeDefinition.weapons, state.selectedCharacter);
       }
     }
 
-    function renderWeaponsTab(weaponsDefinition) {
+    function renderWeaponsTab(weaponsDefinition, character) {
       if (!weaponsDefinition) return;
 
+      const equippedWeaponIds = getEquippedWeaponSkillIds(character);
+      const equippedSet = new Set(equippedWeaponIds);
       const title = createElement("div", "skill-title", weaponsDefinition.title);
       const subtitle = createElement("div", "skill-subtitle", weaponsDefinition.subtitle);
       dom.skillTreeContent.append(title, subtitle);
+      if (equippedWeaponIds.length) {
+        const equippedNames = [];
+        const weaponCatalog = Array.isArray(window.RL_DATA.WEAPON_CATALOG) ? window.RL_DATA.WEAPON_CATALOG : [];
+        const labelsById = Object.fromEntries(
+          weaponCatalog
+            .filter((weapon) => weapon && weapon.id)
+            .map((weapon) => [String(weapon.id), String(weapon.label || toTitle(weapon.id))])
+        );
+        equippedWeaponIds.forEach((weaponId) => {
+          equippedNames.push(labelsById[weaponId] || toTitle(weaponId));
+        });
+        dom.skillTreeContent.appendChild(
+          createElement("div", "skill-subtitle", `Showing equipped weapon trees: ${equippedNames.join(", ")}`)
+        );
+      }
+
+      let renderedWeaponCount = 0;
 
       weaponsDefinition.categories.forEach((category) => {
+        const categoryWeapons = Array.isArray(category.weapons) ? category.weapons : [];
+        const filteredWeapons = equippedSet.size
+          ? categoryWeapons.filter((weapon) => weapon && equippedSet.has(String(weapon.id || "").trim()))
+          : categoryWeapons;
+        if (!filteredWeapons.length) return;
+
         const categoryCard = createElement("div", "category-card");
         const categoryHeader = createElement("div", "category-header", category.label);
         const categoryDesc = createElement("div", "category-desc", category.description);
         categoryCard.append(categoryHeader, categoryDesc);
 
-        category.weapons.forEach((weapon) => {
+        filteredWeapons.forEach((weapon) => {
+          renderedWeaponCount += 1;
           const weaponCard = createElement("div", "weapon-card");
           const weaponName = createElement("div", "weapon-name", weapon.label);
           const weaponDesc = createElement("div", "weapon-desc", weapon.description);
@@ -1224,6 +1296,16 @@
 
         dom.skillTreeContent.appendChild(categoryCard);
       });
+
+      if (!renderedWeaponCount) {
+        dom.skillTreeContent.appendChild(
+          createElement(
+            "div",
+            "skill-empty",
+            "No equipped weapon trees found. Equip a melee or ranged weapon in Inventory to view its skill tree."
+          )
+        );
+      }
     }
 
     function renderClassTab(classDefinition) {
@@ -1596,8 +1678,9 @@
       return { tabId, index };
     }
 
-    function revealStorageLocation(character, location) {
+    function revealStorageLocation(character, location, options) {
       if (!character) return;
+      const safeOptions = options && typeof options === "object" ? options : {};
       const normalized = normalizeStorageLocation(location);
       if (!normalized) return;
       state.selectedCharacter = character;
@@ -1606,7 +1689,9 @@
         ...normalized,
         expiresAt: Date.now() + 2600
       };
-      setActiveSkillTab("inventory");
+      if (safeOptions.openInventory !== false) {
+        setActiveSkillTab("inventory");
+      }
     }
 
     function renderInventoryTab(character, options) {
@@ -3287,6 +3372,10 @@
       setVisible(dom.pauseOverlay, false);
       setVisible(dom.endRunOverlay, false);
       setVisible(dom.deleteCharacterOverlay, false);
+      if (dom.itemReferenceToggleBtn) {
+        setVisible(dom.itemReferenceToggleBtn, true);
+      }
+      syncItemReferenceVisibility();
     }
 
     function showGameScreen() {
@@ -3296,6 +3385,12 @@
       setVisible(dom.pauseOverlay, false);
       setVisible(dom.endRunOverlay, false);
       setVisible(dom.deleteCharacterOverlay, false);
+      if (dom.itemReferenceToggleBtn) {
+        setVisible(dom.itemReferenceToggleBtn, false);
+      }
+      if (dom.itemReferencePanel) {
+        setVisible(dom.itemReferencePanel, false);
+      }
     }
 
     function formatClassSkillTypeLabel(typeId) {
@@ -3378,22 +3473,36 @@
       const hpCurrent = Math.max(0, Math.ceil(hud.hp || 0));
       const hpMax = Math.max(1, Math.ceil(hud.maxHp || 0));
       const healthPotionCharges = Math.max(0, Math.floor(Number(hud.healthPotionCharges || 0)));
-      dom.hudName.textContent = hud.name || "-";
-      dom.hudHp.textContent = `HP: ${hpCurrent}/${hpMax}`;
-      dom.healthHudLabel.textContent = `HP: ${hpCurrent}/${hpMax}`;
+      if (dom.hudName) {
+        dom.hudName.textContent = hud.name || "-";
+      }
+      if (dom.hudHp) {
+        dom.hudHp.textContent = `HP: ${hpCurrent}/${hpMax}`;
+      }
+      if (dom.healthHudLabel) {
+        dom.healthHudLabel.textContent = `HP: ${hpCurrent}/${hpMax}`;
+      }
       if (dom.healthPotionHudLabel) {
         dom.healthPotionHudLabel.textContent = `Potions (Q): ${healthPotionCharges}`;
       }
-      dom.hudLevel.textContent = `Level: ${hud.level || 1}`;
-      dom.hudGold.textContent = `Gold: ${hud.gold || 0}`;
-      dom.hudLegacy.textContent = `Legacy XP: ${hud.legacy || 0}`;
+      if (dom.hudLevel) {
+        dom.hudLevel.textContent = `Level: ${hud.level || 1}`;
+      }
+      if (dom.hudGold) {
+        dom.hudGold.textContent = `Gold: ${hud.gold || 0}`;
+      }
+      if (dom.hudLegacy) {
+        dom.hudLegacy.textContent = `Legacy XP: ${hud.legacy || 0}`;
+      }
       const rageCurrent = Math.max(0, Number(hud.rageCurrent || 0));
       const rageMax = Math.max(1, Number(hud.rageMax || 100));
       const rageActive = Boolean(hud.rageActive);
       const rageSeconds = Math.max(0, Number(hud.rageSeconds || 0));
-      dom.hudRage.textContent = rageActive
-        ? `Rage: ${Math.floor(rageCurrent)}/${Math.floor(rageMax)} (Active ${rageSeconds.toFixed(1)}s)`
-        : `Rage: ${Math.floor(rageCurrent)}/${Math.floor(rageMax)}`;
+      if (dom.hudRage) {
+        dom.hudRage.textContent = rageActive
+          ? `Rage: ${Math.floor(rageCurrent)}/${Math.floor(rageMax)} (Active ${rageSeconds.toFixed(1)}s)`
+          : `Rage: ${Math.floor(rageCurrent)}/${Math.floor(rageMax)}`;
+      }
       const timerText = formatTime(hud.time || 0);
       if (dom.roundTimerHudLabel) {
         dom.roundTimerHudLabel.textContent = timerText;
@@ -3402,12 +3511,21 @@
         dom.hudTimer.textContent = timerText;
       }
       const rageProgress = Math.max(0, Math.min(1, rageCurrent / rageMax));
-      dom.rageFill.style.width = `${(rageProgress * 100).toFixed(2)}%`;
-      dom.rageFill.classList.toggle("active", rageActive);
+      if (dom.rageFill) {
+        dom.rageFill.style.width = `${(rageProgress * 100).toFixed(2)}%`;
+        dom.rageFill.classList.toggle("active", rageActive);
+      }
       const hpProgress = Math.max(0, Math.min(1, hpCurrent / hpMax));
-      dom.healthFill.style.width = `${(hpProgress * 100).toFixed(2)}%`;
+      if (dom.healthFill) {
+        dom.healthFill.style.width = `${(hpProgress * 100).toFixed(2)}%`;
+      }
       const xpProgress = Math.max(0, Math.min(1, hud.xpProgress || 0));
-      dom.xpFill.style.width = `${(xpProgress * 100).toFixed(2)}%`;
+      if (dom.xpHudLabel) {
+        dom.xpHudLabel.textContent = `Level ${Math.max(1, Math.floor(Number(hud.level || 1)))}`;
+      }
+      if (dom.xpFill) {
+        dom.xpFill.style.width = `${(xpProgress * 100).toFixed(2)}%`;
+      }
       renderClassSkillHud(hud.classSkills);
     }
 

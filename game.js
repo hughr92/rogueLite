@@ -38,6 +38,21 @@
     return { x: dx / length, y: dy / length };
   }
 
+  function pointToSegmentDistance(px, py, ax, ay, bx, by) {
+    const abX = bx - ax;
+    const abY = by - ay;
+    const apX = px - ax;
+    const apY = py - ay;
+    const abLenSq = abX * abX + abY * abY;
+    if (abLenSq <= 0.0001) {
+      return Math.hypot(px - ax, py - ay);
+    }
+    const projection = clamp((apX * abX + apY * abY) / abLenSq, 0, 1);
+    const closestX = ax + abX * projection;
+    const closestY = ay + abY * projection;
+    return Math.hypot(px - closestX, py - closestY);
+  }
+
   function weightedChoice(weights) {
     let total = 0;
     const entries = Object.entries(weights).filter((entry) => entry[1] > 0);
@@ -110,6 +125,10 @@
   const LEVEL_BACKGROUND_MUSIC_OPTIONS = Object.freeze({
     1: [1, 2]
   });
+  const MAP_EDITOR_LEVEL_SLOTS_STORAGE_KEY = "rl_map_editor_level_slots_v2";
+  const BUNDLED_LEVEL_MAP_PATHS = Object.freeze({
+    level_1: "./tools/map-editor/maps/level_1_v1.json"
+  });
   const DEFAULT_MUSIC_LEVEL_INDEX = 1;
   const FIXED_WORLD_TILE_SIZE = 48;
   const FIXED_WORLD_TILES_WIDE = 20;
@@ -143,6 +162,7 @@
       this.obstacleSprites = this.createObstacleSprites(this.terrainTypes);
       this.chestSprites = this.createChestSprites();
       this.pickupSprites = this.createPickupSprites();
+      this.attackEffectSprites = this.createAttackEffectSprites();
       this.characterSprites = this.createCharacterSprites();
       this.enemySprites = this.createEnemySprites();
       this.enemyProjectileSprites = this.createEnemyProjectileSprites();
@@ -155,6 +175,12 @@
         baseTrackIndex: 0,
         activeLevelIndex: DEFAULT_MUSIC_LEVEL_INDEX
       };
+      this.levelMapDataCache = Object.create(null);
+      this.levelMapBackgroundCache = Object.create(null);
+      this.levelMapBackgroundLoadPromises = Object.create(null);
+      this.backgroundImageCache = Object.create(null);
+      this.backgroundImageLoadPromises = Object.create(null);
+      this.backgroundDataBlobUrlCache = Object.create(null);
       this.renderViewport = {
         screenWidth: 1,
         screenHeight: 1,
@@ -527,12 +553,451 @@
       });
     }
 
+    readMapEditorLevelSlots() {
+      if (typeof localStorage === "undefined") return null;
+      try {
+        const raw = localStorage.getItem(MAP_EDITOR_LEVEL_SLOTS_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+        return parsed;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    getSavedMapDataForLevel(levelId) {
+      const safeLevelId = String(levelId || "").trim();
+      if (!safeLevelId) return null;
+      const slots = this.readMapEditorLevelSlots();
+      if (!slots) return null;
+      const entry = slots[safeLevelId];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+      return entry;
+    }
+
+    getBundledLevelMapPath(levelId) {
+      const safeLevelId = String(levelId || "").trim();
+      if (!safeLevelId) return null;
+      return BUNDLED_LEVEL_MAP_PATHS[safeLevelId] || null;
+    }
+
+    primeBundledLevelMapCache() {
+      const levelIds = Object.keys(BUNDLED_LEVEL_MAP_PATHS || {});
+      levelIds.forEach((levelId) => {
+        this.getBundledMapDataForLevel(levelId).catch(() => {
+          // Ignore preload failures; runtime gracefully falls back.
+        });
+      });
+    }
+
+    async getBundledMapDataForLevel(levelId) {
+      const safeLevelId = String(levelId || "").trim();
+      if (!safeLevelId) return null;
+      if (Object.prototype.hasOwnProperty.call(this.levelMapDataCache, safeLevelId)) {
+        return this.levelMapDataCache[safeLevelId];
+      }
+      const mapPath = this.getBundledLevelMapPath(safeLevelId);
+      if (!mapPath) {
+        this.levelMapDataCache[safeLevelId] = null;
+        return null;
+      }
+
+      try {
+        const response = await fetch(mapPath, { cache: "no-store" });
+        if (!response || !response.ok) {
+          this.levelMapDataCache[safeLevelId] = null;
+          return null;
+        }
+        const payload = await response.json();
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          this.levelMapDataCache[safeLevelId] = null;
+          return null;
+        }
+        this.levelMapDataCache[safeLevelId] = payload;
+        return payload;
+      } catch (error) {
+        this.levelMapDataCache[safeLevelId] = null;
+        return null;
+      }
+    }
+
+    extractMapBackgroundConfig(mapData) {
+      if (!mapData || typeof mapData !== "object" || Array.isArray(mapData)) return null;
+      const rawBackground = mapData.backgroundImage;
+      if (!rawBackground || typeof rawBackground !== "object" || Array.isArray(rawBackground)) return null;
+      const src = String(rawBackground.src || "").trim();
+      if (!src) return null;
+      const parsedMapWidth = Number(mapData.width);
+      const parsedMapHeight = Number(mapData.height);
+      const parsedOpacity = Number(rawBackground.opacity);
+      const parsedScale = Number(rawBackground.scale);
+      const parsedOffsetX = Number(rawBackground.offsetX);
+      const parsedOffsetY = Number(rawBackground.offsetY);
+      const mapWidth = Number.isFinite(parsedMapWidth) ? Math.max(1, parsedMapWidth) : FIXED_WORLD_WIDTH;
+      const mapHeight = Number.isFinite(parsedMapHeight) ? Math.max(1, parsedMapHeight) : FIXED_WORLD_HEIGHT;
+      const opacity = Number.isFinite(parsedOpacity) ? clamp(parsedOpacity, 0, 1) : 0.5;
+      const scale = Number.isFinite(parsedScale) ? clamp(parsedScale, 0.05, 6) : 1;
+      const offsetX = Number.isFinite(parsedOffsetX) ? parsedOffsetX : 0;
+      const offsetY = Number.isFinite(parsedOffsetY) ? parsedOffsetY : 0;
+      return {
+        src,
+        opacity,
+        scale,
+        offsetX,
+        offsetY,
+        mapWidth,
+        mapHeight
+      };
+    }
+
+    extractMapPlayerStart(mapData, worldWidth, worldHeight) {
+      if (!mapData || typeof mapData !== "object" || Array.isArray(mapData)) return null;
+      const rawPlayerStart = mapData.playerStart;
+      if (!rawPlayerStart || typeof rawPlayerStart !== "object" || Array.isArray(rawPlayerStart)) return null;
+      const parsedX = Number(rawPlayerStart.x);
+      const parsedY = Number(rawPlayerStart.y);
+      if (!Number.isFinite(parsedX) || !Number.isFinite(parsedY)) return null;
+      return {
+        x: clamp(parsedX, 0, Math.max(1, Number(worldWidth || FIXED_WORLD_WIDTH))),
+        y: clamp(parsedY, 0, Math.max(1, Number(worldHeight || FIXED_WORLD_HEIGHT)))
+      };
+    }
+
+    getRunPlayerStartForLevel(levelId, worldWidth, worldHeight) {
+      const safeLevelId = String(levelId || "").trim();
+      if (!safeLevelId) return null;
+      const savedMapData = this.getSavedMapDataForLevel(safeLevelId);
+      const savedStart = this.extractMapPlayerStart(savedMapData, worldWidth, worldHeight);
+      if (savedStart) return savedStart;
+      const bundledMapData = this.levelMapDataCache[safeLevelId];
+      const bundledStart = this.extractMapPlayerStart(bundledMapData, worldWidth, worldHeight);
+      if (bundledStart) return bundledStart;
+      return null;
+    }
+
+    buildMapBackgroundSignature(config) {
+      if (!config) return "";
+      return [
+        String(config.src || ""),
+        String(Number(config.opacity || 0)),
+        String(Number(config.scale || 1)),
+        String(Number(config.offsetX || 0)),
+        String(Number(config.offsetY || 0)),
+        String(Number(config.mapWidth || 0)),
+        String(Number(config.mapHeight || 0))
+      ].join("|");
+    }
+
+    resolveMapBackgroundSourceCandidates(rawSrc) {
+      const safeSrc = String(rawSrc || "").trim();
+      if (!safeSrc) return [];
+
+      const candidates = [];
+      const pushCandidate = (value) => {
+        const normalized = String(value || "").trim();
+        if (!normalized) return;
+        if (candidates.includes(normalized)) return;
+        candidates.push(normalized);
+      };
+
+      pushCandidate(safeSrc);
+      const hasScheme = /^[a-z]+:/i.test(safeSrc) || safeSrc.startsWith("//");
+      const isAbsolutePath = safeSrc.startsWith("/");
+      if (hasScheme || isAbsolutePath) return candidates;
+
+      const normalizedRelative = safeSrc.replace(/^\.?[\\/]/, "").replace(/\\/g, "/");
+      pushCandidate(`./${normalizedRelative}`);
+      pushCandidate(`tools/map-editor/maps/${normalizedRelative}`);
+      pushCandidate(`./tools/map-editor/maps/${normalizedRelative}`);
+      pushCandidate(`tools/map-editor/${normalizedRelative}`);
+      pushCandidate(`./tools/map-editor/${normalizedRelative}`);
+
+      if (normalizedRelative.startsWith("../")) {
+        const withoutParents = normalizedRelative.replace(/^(\.\.\/)+/, "");
+        pushCandidate(withoutParents);
+        pushCandidate(`./${withoutParents}`);
+      }
+
+      return candidates;
+    }
+
+    async resolveBlobUrlForDataSource(rawSrc) {
+      const safeSrc = String(rawSrc || "").trim();
+      if (!safeSrc.startsWith("data:")) return null;
+      if (typeof fetch !== "function" || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+        return null;
+      }
+      if (Object.prototype.hasOwnProperty.call(this.backgroundDataBlobUrlCache, safeSrc)) {
+        return this.backgroundDataBlobUrlCache[safeSrc];
+      }
+
+      try {
+        const response = await fetch(safeSrc);
+        if (!response || !response.ok) {
+          this.backgroundDataBlobUrlCache[safeSrc] = null;
+          return null;
+        }
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        this.backgroundDataBlobUrlCache[safeSrc] = blobUrl;
+        return blobUrl;
+      } catch (error) {
+        this.backgroundDataBlobUrlCache[safeSrc] = null;
+        return null;
+      }
+    }
+
+    loadImageFromSource(source) {
+      const safeSource = String(source || "").trim();
+      if (!safeSource || typeof Image === "undefined") return Promise.resolve(null);
+      return new Promise((resolve) => {
+        const image = new Image();
+        image.onload = () => {
+          resolve(image);
+        };
+        image.onerror = () => {
+          resolve(null);
+        };
+        image.src = safeSource;
+      });
+    }
+
+    async loadBackgroundImage(src) {
+      const safeSrc = String(src || "").trim();
+      if (!safeSrc || typeof Image === "undefined") return null;
+      if (Object.prototype.hasOwnProperty.call(this.backgroundImageCache, safeSrc)) {
+        return this.backgroundImageCache[safeSrc];
+      }
+      if (Object.prototype.hasOwnProperty.call(this.backgroundImageLoadPromises, safeSrc)) {
+        return this.backgroundImageLoadPromises[safeSrc];
+      }
+
+      const promise = (async () => {
+        const candidates = this.resolveMapBackgroundSourceCandidates(safeSrc);
+        const dataBlobUrl = await this.resolveBlobUrlForDataSource(safeSrc);
+        if (dataBlobUrl) {
+          candidates.unshift(dataBlobUrl);
+        }
+
+        for (let i = 0; i < candidates.length; i += 1) {
+          const loaded = await this.loadImageFromSource(candidates[i]);
+          if (loaded) {
+            this.backgroundImageCache[safeSrc] = loaded;
+            return loaded;
+          }
+        }
+        return null;
+      })();
+      this.backgroundImageLoadPromises[safeSrc] = promise;
+      const loadedImage = await promise;
+      delete this.backgroundImageLoadPromises[safeSrc];
+      return loadedImage;
+    }
+
+    async resolveLevelMapBackground(levelId) {
+      const safeLevelId = String(levelId || "").trim();
+      if (!safeLevelId) return null;
+
+      const localMap = this.getSavedMapDataForLevel(safeLevelId);
+      let backgroundConfig = this.extractMapBackgroundConfig(localMap);
+      if (!backgroundConfig) {
+        const bundledMap = await this.getBundledMapDataForLevel(safeLevelId);
+        backgroundConfig = this.extractMapBackgroundConfig(bundledMap);
+      }
+      if (!backgroundConfig) return null;
+
+      const signature = this.buildMapBackgroundSignature(backgroundConfig);
+      const cached = this.levelMapBackgroundCache[safeLevelId];
+      if (cached && cached.signature === signature && cached.background) {
+        return cached.background;
+      }
+
+      const image = await this.loadBackgroundImage(backgroundConfig.src);
+      if (!image) return null;
+
+      const resolved = {
+        ...backgroundConfig,
+        image
+      };
+      this.levelMapBackgroundCache[safeLevelId] = {
+        signature,
+        background: resolved
+      };
+      return resolved;
+    }
+
+    attachRunMapBackground(runState) {
+      if (!runState || !runState.level || !runState.level.id) return;
+      const levelId = String(runState.level.id).trim();
+      if (!levelId) return;
+
+      runState.mapBackground = null;
+      if (Object.prototype.hasOwnProperty.call(this.levelMapBackgroundLoadPromises, levelId)) {
+        this.levelMapBackgroundLoadPromises[levelId]
+          .then((background) => {
+            if (background) runState.mapBackground = background;
+          })
+          .catch(() => {
+            // Ignore map background load errors and keep fallback rendering.
+          });
+        return;
+      }
+
+      const loadPromise = this.resolveLevelMapBackground(levelId);
+      this.levelMapBackgroundLoadPromises[levelId] = loadPromise;
+      loadPromise
+        .then((background) => {
+          if (background) runState.mapBackground = background;
+        })
+        .finally(() => {
+          delete this.levelMapBackgroundLoadPromises[levelId];
+        });
+    }
+
+    drawRunMapBackground(background, worldWidth, worldHeight) {
+      if (!background || !background.image) return false;
+      const image = background.image;
+      if (!image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return false;
+
+      const ctx = this.ctx;
+      const sourceWidth = Math.max(1, Number(background.mapWidth || image.naturalWidth));
+      const sourceHeight = Math.max(1, Number(background.mapHeight || image.naturalHeight));
+      const fitScale = Math.min(worldWidth / sourceWidth, worldHeight / sourceHeight);
+      const userScale = clamp(Number(background.scale || 1), 0.05, 6);
+      const drawWidth = sourceWidth * fitScale * userScale;
+      const drawHeight = sourceHeight * fitScale * userScale;
+      const drawCenterX = worldWidth * 0.5 + Number(background.offsetX || 0) * fitScale;
+      const drawCenterY = worldHeight * 0.5 + Number(background.offsetY || 0) * fitScale;
+      const drawLeft = drawCenterX - drawWidth * 0.5;
+      const drawTop = drawCenterY - drawHeight * 0.5;
+
+      ctx.save();
+      ctx.globalAlpha = clamp(Number(background.opacity), 0, 1);
+      ctx.drawImage(image, drawLeft, drawTop, drawWidth, drawHeight);
+      ctx.restore();
+      return true;
+    }
+
     hasActiveBossEncounter(run) {
       if (!run || !run.entities || !Array.isArray(run.entities.enemies)) return false;
       return run.entities.enemies.some((enemy) => {
         if (!enemy || enemy.dead) return false;
         return enemy.typeId === "miniboss" || enemy.typeId === "finalBoss";
       });
+    }
+
+    getMiniBossEncounterConfig() {
+      return DATA && DATA.BOSSES && DATA.BOSSES.miniboss ? DATA.BOSSES.miniboss : null;
+    }
+
+    createInitialBossEncounterState() {
+      return {
+        activeBossId: null,
+        arena: {
+          active: false,
+          sourceBossId: null,
+          centerX: 0,
+          centerY: 0,
+          width: 0,
+          height: 0,
+          borderColor: "rgba(228, 70, 70, 0.95)",
+          fillColor: "rgba(120, 14, 14, 0.06)",
+          lineWidth: 3
+        }
+      };
+    }
+
+    createMiniBossRuntimeState() {
+      const config = this.getMiniBossEncounterConfig() || {};
+      return {
+        name: String(config.displayName || DATA.ENEMIES.miniboss.label || "Mini Boss"),
+        className: String(config.className || "Boss"),
+        type: String(config.type || "mini-boss"),
+        state: "idle",
+        currentAbility: null,
+        currentAbilityId: null,
+        castStartTime: 0,
+        castDuration: 0,
+        castElapsedMs: 0,
+        cooldownTimer: 0,
+        nextAbilityIndex: 0,
+        castData: null,
+        arenaActive: false
+      };
+    }
+
+    activateMiniBossArenaForEnemy(enemy) {
+      const run = this.currentRun;
+      if (!run || !enemy || enemy.typeId !== "miniboss") return;
+      const config = this.getMiniBossEncounterConfig() || {};
+      const arenaConfig = config.arena || {};
+      if (arenaConfig.active === false) return;
+      if (!run.bossEncounter) {
+        run.bossEncounter = this.createInitialBossEncounterState();
+      }
+      const multiplier = Math.max(1.1, Number(arenaConfig.sizeMultiplier || 1.42));
+      const arenaWidth = run.world.width * multiplier;
+      const arenaHeight = run.world.height * multiplier;
+      run.bossEncounter.activeBossId = enemy.id;
+      run.bossEncounter.arena = {
+        active: true,
+        sourceBossId: enemy.id,
+        centerX: run.player.x,
+        centerY: run.player.y,
+        width: arenaWidth,
+        height: arenaHeight,
+        borderColor: String(arenaConfig.borderColor || "rgba(228, 70, 70, 0.95)"),
+        fillColor: String(arenaConfig.fillColor || "rgba(120, 14, 14, 0.06)"),
+        lineWidth: Math.max(1, Number(arenaConfig.lineWidth || 3))
+      };
+      if (!enemy.boss || typeof enemy.boss !== "object") {
+        enemy.boss = this.createMiniBossRuntimeState();
+      }
+      enemy.boss.arenaActive = true;
+    }
+
+    initializeMiniBossEncounterForEnemy(enemy) {
+      if (!enemy || enemy.typeId !== "miniboss") return;
+      if (!enemy.boss || typeof enemy.boss !== "object") {
+        enemy.boss = this.createMiniBossRuntimeState();
+      }
+      this.activateMiniBossArenaForEnemy(enemy);
+    }
+
+    getActiveMiniBoss(run) {
+      const sourceRun = run || this.currentRun;
+      if (!sourceRun || !sourceRun.entities || !Array.isArray(sourceRun.entities.enemies)) return null;
+      const miniBosses = sourceRun.entities.enemies.filter((enemy) => enemy && !enemy.dead && enemy.typeId === "miniboss");
+      if (!miniBosses.length) return null;
+      const encounter = sourceRun.bossEncounter || null;
+      if (!encounter || !encounter.activeBossId) return miniBosses[0];
+      return miniBosses.find((enemy) => enemy.id === encounter.activeBossId) || miniBosses[0];
+    }
+
+    syncBossEncounterState() {
+      const run = this.currentRun;
+      if (!run || !run.bossEncounter) return;
+      const encounter = run.bossEncounter;
+      const miniBosses = run.entities.enemies.filter((enemy) => enemy && !enemy.dead && enemy.typeId === "miniboss");
+      if (!miniBosses.length) {
+        encounter.activeBossId = null;
+        if (encounter.arena) {
+          encounter.arena.active = false;
+          encounter.arena.sourceBossId = null;
+        }
+        return;
+      }
+
+      let activeBoss = miniBosses.find((enemy) => enemy.id === encounter.activeBossId) || miniBosses[0];
+      encounter.activeBossId = activeBoss.id;
+      if (!encounter.arena || encounter.arena.active !== true) {
+        this.activateMiniBossArenaForEnemy(activeBoss);
+        activeBoss = this.getActiveMiniBoss(run) || activeBoss;
+      }
+      if (activeBoss.boss && typeof activeBoss.boss === "object") {
+        activeBoss.boss.arenaActive = Boolean(encounter.arena && encounter.arena.active);
+      }
     }
 
     resetBossMusicBlend() {
@@ -610,6 +1075,26 @@
       return sprites;
     }
 
+    createAttackEffectSprites() {
+      if (typeof Image === "undefined") return {};
+      const sprites = {};
+      const axe = new Image();
+      axe.src = "assets/items/grey/axe/icon.png";
+      sprites.axe = axe;
+      const groundSlam = new Image();
+      groundSlam.src = "assets/skills/effects/class/barbarian/ground_slam_effect.svg";
+      sprites.ground_slam = groundSlam;
+      return sprites;
+    }
+
+    getAttackEffectSprite(effectTypeId) {
+      if (!this.attackEffectSprites || typeof this.attackEffectSprites !== "object") return null;
+      const key = String(effectTypeId || "").trim();
+      const image = key ? this.attackEffectSprites[key] : null;
+      if (!image || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      return image;
+    }
+
     getPickupSprite(typeId) {
       if (!this.pickupSprites || typeof this.pickupSprites !== "object") return null;
       const key = String(typeId || "").trim();
@@ -625,6 +1110,8 @@
         runner: "images/enemies/melee_fast/1_skitter/base/skeleton_skitter_top.png",
         shooter: "images/enemies/ranged_archer/1_hex_archer/base/skeleton_archer_top.png",
         dasher: "images/enemies/melee_charge/1_lancer/base/skeleton_lancer_top.png",
+        miniboss: "images/enemies/elite_leader/1_war_captain/base/skeleton_war_captain_top.png",
+        finalBoss: "images/enemies/boss_final/1_abyss_tyrant/base/skeleton_abyss_tyrant_top.png",
         shieldbearer_shielded: "images/enemies/melee_tank/1_bulwark/base/skeleton_bulwark_top_shield.png",
         shieldbearer_broken: "images/enemies/melee_tank/1_bulwark/base/skeleton_bulwark_top_shieldGone.png"
       };
@@ -894,6 +1381,7 @@
       this.wireAudioSettingsControls();
       this.wireInGameSettingsMenuButton();
       this.applyAudioSettings();
+      this.primeBundledLevelMapCache();
       this.handleResize();
       window.addEventListener("resize", this.boundResize);
 
@@ -1335,7 +1823,7 @@
           state.groundSlam.cooldownSeconds = Math.max(0.5, Number(baseValues.cooldownSeconds || 10));
           state.groundSlam.cooldownLeft = 0;
           state.groundSlam.coneRadians = clamp((Math.PI * Math.max(1, Number(baseValues.coneDegrees || 45))) / 180, 0.2, Math.PI * 2);
-          state.groundSlam.rangeMultiplier = Math.max(0.4, Number(baseValues.rangeMultiplier || 1.2));
+          state.groundSlam.rangeMultiplier = Math.max(0.4, Number(baseValues.rangeMultiplier || 2.4));
           state.groundSlam.damageMultiplier = Math.max(0.1, Number(baseValues.damageMultiplier || 0.85));
           state.groundSlam.stunSeconds = Math.max(0.1, Number(baseValues.stunSeconds || 0.5));
         } else if (skill.id === "war_cry") {
@@ -1630,6 +2118,19 @@
         didSpin: false,
         strokeColor: "rgba(255, 211, 118, ALPHA)"
       });
+      run.entities.attackEffects.push({
+        x: player.x,
+        y: player.y,
+        radius: range,
+        centerAngle: player.facing,
+        arc: cone,
+        remaining: 2,
+        duration: 2,
+        didSpin: false,
+        noStroke: true,
+        visualSpriteId: "ground_slam",
+        visualSize: Math.max(96, range * 1.7)
+      });
       if (hitAny) {
         this.gainRage(run, (run.player.rage.gainOnHit || 0) * 2);
       }
@@ -1644,16 +2145,14 @@
       if (Number(skill.cooldownLeft || 0) > 0) return false;
 
       const player = run.player;
-      const radius = Math.max(player.radius + 20, Number(skill.radius || 132));
-      const radiusSq = radius * radius;
+      const worldWidth = Math.max(1, Number(run.world && run.world.width) || 1);
+      const worldHeight = Math.max(1, Number(run.world && run.world.height) || 1);
+      const radius = Math.max(Number(skill.radius || 132), Math.hypot(worldWidth, worldHeight));
       const slowPct = clamp(Number(skill.slowPct || 0.2), 0, 0.9);
       const durationSeconds = Math.max(0.25, Number(skill.durationSeconds || 2));
 
       run.entities.enemies.forEach((enemy) => {
         if (!enemy || enemy.dead) return;
-        const dx = enemy.x - player.x;
-        const dy = enemy.y - player.y;
-        if (dx * dx + dy * dy > radiusSq) return;
         enemy.slowPct = Math.max(Number(enemy.slowPct || 0), slowPct);
         enemy.slowTimer = Math.max(Number(enemy.slowTimer || 0), durationSeconds);
       });
@@ -1879,6 +2378,14 @@
           selectedLevelId: selection.level.id,
           selectedDifficulty: selection.difficulty
         });
+        if (
+          storageLocation &&
+          typeof storageLocation === "object" &&
+          Number.isInteger(storageLocation.index) &&
+          typeof this.ui.revealStorageLocation === "function"
+        ) {
+          this.ui.revealStorageLocation(refreshed, storageLocation, { openInventory: false });
+        }
       }
       const storageTabLabelMap = {
         general: "General",
@@ -1933,6 +2440,14 @@
           selectedLevelId: selection.level.id,
           selectedDifficulty: selection.difficulty
         });
+        if (
+          storageLocation &&
+          typeof storageLocation === "object" &&
+          Number.isInteger(storageLocation.index) &&
+          typeof this.ui.revealStorageLocation === "function"
+        ) {
+          this.ui.revealStorageLocation(refreshed, storageLocation, { openInventory: false });
+        }
       }
       const sale = result.sale || {};
       if (sale.itemName) {
@@ -2229,6 +2744,60 @@
 
     isWeaponItemType(itemType) {
       return itemType === "melee_weapon" || itemType === "ranged_weapon";
+    }
+
+    inferWeaponSkillIdFromItem(item) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return "";
+      const candidates = [item.templateId, item.id, item.name]
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter((value) => value.length > 0);
+      if (!candidates.length) return "";
+      const hasToken = (token) => candidates.some((candidate) => candidate.includes(token));
+      if (hasToken("slingshot")) return "slingshot";
+      if (hasToken("javelin")) return "javelin";
+      if (hasToken("light_hammer") || hasToken("great_hammer") || hasToken("hammer")) return "hammer";
+      if (hasToken("rapier") || hasToken("sword")) return "sword";
+      if (hasToken("axe")) return "axe";
+      return "";
+    }
+
+    getRunEquippedWeaponSkillIds(character) {
+      const equipment =
+        character &&
+        character.inventory &&
+        character.inventory.equipment &&
+        typeof character.inventory.equipment === "object"
+          ? character.inventory.equipment
+          : {};
+      const slots = ["primaryMeleeWeapon", "secondaryMeleeWeapon", "rangedWeapon"];
+      const unique = {};
+      const ids = [];
+      slots.forEach((slotKey) => {
+        const item = equipment[slotKey];
+        const weaponId = this.inferWeaponSkillIdFromItem(item);
+        if (!weaponId || unique[weaponId]) return;
+        unique[weaponId] = true;
+        ids.push(weaponId);
+      });
+      return ids;
+    }
+
+    isWeaponUpgradeAllowedForRun(run, upgrade) {
+      if (!upgrade || typeof upgrade !== "object") return false;
+      if (!upgrade.weaponId) return true;
+      const available = Array.isArray(run && run.availableWeaponSkillIds) ? run.availableWeaponSkillIds : [];
+      if (!available.length) return false;
+      return available.includes(String(upgrade.weaponId || "").trim());
+    }
+
+    calculateUpgradeCapacityForWeaponSet(weaponIds) {
+      const allowedSet = new Set(Array.isArray(weaponIds) ? weaponIds : []);
+      return DATA.UPGRADES.reduce((sum, upgrade) => {
+        if (!upgrade || typeof upgrade !== "object") return sum;
+        if (!upgrade.weaponId) return sum + Math.max(0, Math.floor(Number(upgrade.maxRank || 0)));
+        if (!allowedSet.has(String(upgrade.weaponId || "").trim())) return sum;
+        return sum + Math.max(0, Math.floor(Number(upgrade.maxRank || 0)));
+      }, 0);
     }
 
     isValidWeaponItemForBinding(item, requiredItemType) {
@@ -2964,6 +3533,7 @@
     canApplyWorldShiftWithoutPlayerObstacleCollision(shiftX, shiftY) {
       const run = this.currentRun;
       if (!run || !run.player) return true;
+      if (!this.canApplyWorldShiftInsideBossArena(shiftX, shiftY)) return false;
       const obstacles = this.getBlockingTerrainObstacles(run, "blocksPlayer");
       if (!obstacles.length) return true;
       const player = run.player;
@@ -2982,6 +3552,47 @@
         }
       }
       return true;
+    }
+
+    canApplyWorldShiftInsideBossArena(shiftX, shiftY) {
+      const run = this.currentRun;
+      if (!run || !run.player || !run.bossEncounter || !run.bossEncounter.arena) return true;
+      const arena = run.bossEncounter.arena;
+      if (!arena.active) return true;
+      const halfW = Math.max(1, Number(arena.width || 0) * 0.5);
+      const halfH = Math.max(1, Number(arena.height || 0) * 0.5);
+      const nextCenterX = Number(arena.centerX || 0) + shiftX;
+      const nextCenterY = Number(arena.centerY || 0) + shiftY;
+      const minX = nextCenterX - halfW;
+      const maxX = nextCenterX + halfW;
+      const minY = nextCenterY - halfH;
+      const maxY = nextCenterY + halfH;
+      const player = run.player;
+      return (
+        player.x - player.radius >= minX &&
+        player.x + player.radius <= maxX &&
+        player.y - player.radius >= minY &&
+        player.y + player.radius <= maxY
+      );
+    }
+
+    shiftBossEncounterWorldObjects(shiftX, shiftY) {
+      const run = this.currentRun;
+      if (!run) return;
+      const encounter = run.bossEncounter;
+      if (encounter && encounter.arena && encounter.arena.active) {
+        encounter.arena.centerX += shiftX;
+        encounter.arena.centerY += shiftY;
+      }
+      if (!run.entities || !Array.isArray(run.entities.enemies)) return;
+      run.entities.enemies.forEach((enemy) => {
+        if (!enemy || enemy.dead || !enemy.boss || !enemy.boss.castData) return;
+        const castData = enemy.boss.castData;
+        if (Number.isFinite(Number(castData.targetX))) castData.targetX += shiftX;
+        if (Number.isFinite(Number(castData.targetY))) castData.targetY += shiftY;
+        if (Number.isFinite(Number(castData.centerX))) castData.centerX += shiftX;
+        if (Number.isFinite(Number(castData.centerY))) castData.centerY += shiftY;
+      });
     }
 
     applyWorldShiftWithObstacleCollision(shiftX, shiftY) {
@@ -3924,8 +4535,12 @@
       const playerBase = DATA.PLAYER_BASE;
       const width = FIXED_WORLD_WIDTH;
       const height = FIXED_WORLD_HEIGHT;
+      const availableWeaponSkillIds = this.getRunEquippedWeaponSkillIds(character);
+      const totalUpgradeCapacity = this.calculateUpgradeCapacityForWeaponSet(availableWeaponSkillIds);
       const level = this.resolveSelectedLevelForCharacter(character, selectedLevel && selectedLevel.id);
       const difficulty = this.resolveSelectedDifficultyForCharacter(character, level, selectedDifficulty);
+      const configuredPlayerStart = this.getRunPlayerStartForLevel(level && level.id, width, height);
+      const initialPlayerStart = configuredPlayerStart || { x: width * 0.5, y: height * 0.5 };
 
       const runState = {
         characterId: character.id,
@@ -3936,6 +4551,7 @@
         bestiaryDiscoveries: this.getCharacterBestiaryDiscoverySet(character),
         bountyDamageBonuses: this.getCharacterBountyDamageBonusMap(character),
         classId: character.classId,
+        availableWeaponSkillIds,
         progressionLevel: Math.max(1, Math.floor(Number(character.progressionLevel || 1))),
         attributes: {
           strength: Number((character.attributeLevels && character.attributeLevels.strength) || 0),
@@ -3945,11 +4561,13 @@
         },
         attributeEffects: null,
         world: { width, height },
+        playerStart: initialPlayerStart,
         worldOffset: { x: 0, y: 0 },
         terrainRuntime: {
           movementSpawnTimer: 0,
           lastDirection: null
         },
+        mapBackground: null,
         debug: {
           terrainEnabled: this.getObstacleConfig().debug.terrainEnabled,
           showTerrainColliderOutlines: this.getObstacleConfig().debug.showColliderOutlines,
@@ -3964,8 +4582,8 @@
         pauseReason: null,
         reasonEnded: null,
         player: {
-          x: width * 0.5,
-          y: height * 0.5,
+          x: initialPlayerStart.x,
+          y: initialPlayerStart.y,
           radius: playerBase.radius,
           baseMoveSpeed: playerBase.moveSpeed,
           moveSpeed: playerBase.moveSpeed,
@@ -4042,7 +4660,7 @@
           selectedSkillIds: [],
           currentUpgradeChoices: [],
           totalUpgradesTaken: 0,
-          totalUpgradeCapacity: DATA.TOTAL_UPGRADE_CAPACITY,
+          totalUpgradeCapacity,
           levelCapReached: false
         },
         spawn: {
@@ -4051,6 +4669,7 @@
           finalBossSpawned: false,
           swarm: this.createInitialSwarmState()
         },
+        bossEncounter: this.createInitialBossEncounterState(),
         powerups: this.createInitialPowerupState(character),
         entities: {
           enemies: [],
@@ -4082,6 +4701,7 @@
       runState.attributeEffects = this.calculateAttributeEffects(runState.attributes);
       this.applyAttributeBaseStats(runState);
       this.recalculateWeaponStats(runState);
+      this.attachRunMapBackground(runState);
       return runState;
     }
 
@@ -4128,8 +4748,16 @@
     centerPlayerInWorld() {
       const run = this.currentRun;
       if (!run) return;
-      run.player.x = run.world.width * 0.5;
-      run.player.y = run.world.height * 0.5;
+      const configuredStart = run.playerStart && Number.isFinite(Number(run.playerStart.x)) && Number.isFinite(Number(run.playerStart.y))
+        ? run.playerStart
+        : null;
+      if (configuredStart) {
+        run.player.x = clamp(Number(configuredStart.x), 0, run.world.width);
+        run.player.y = clamp(Number(configuredStart.y), 0, run.world.height);
+      } else {
+        run.player.x = run.world.width * 0.5;
+        run.player.y = run.world.height * 0.5;
+      }
     }
 
     returnHome() {
@@ -4286,6 +4914,7 @@
         obstacle.x += shiftX;
         obstacle.y += shiftY;
       });
+      this.shiftBossEncounterWorldObjects(shiftX, shiftY);
     }
 
     updatePlayerInvulnerability(dt) {
@@ -4326,6 +4955,8 @@
         const spread = (swingIndex - (swingCount - 1) / 2) * 0.24;
         const centerAngle = player.facing + spread;
         const arc = didSpin ? Math.PI * 2 : axe.arcRadians;
+        const sweepDirectionBase = slotKey === "secondaryMeleeWeapon" ? -1 : 1;
+        const sweepDirection = swingIndex % 2 === 0 ? sweepDirectionBase : -sweepDirectionBase;
         this.applyAxeDamage(centerAngle, arc, axe.damage, didSpin);
         this.currentRun.entities.attackEffects.push({
           x: player.x,
@@ -4336,7 +4967,9 @@
           remaining: axe.swingDuration,
           duration: axe.swingDuration,
           didSpin,
-          meleeSlot: slotKey
+          meleeSlot: slotKey,
+          sweepDirection,
+          weaponEffectId: "axe"
         });
       }
     }
@@ -4504,7 +5137,7 @@
 
     spawnEnemy(enemyTypeId, timeSeconds, options) {
       const definition = DATA.ENEMIES[enemyTypeId];
-      if (!definition) return;
+      if (!definition) return null;
       const run = this.currentRun;
       const world = run.world;
       const minute = timeSeconds / 60;
@@ -4641,6 +5274,7 @@
       if (enemy.typeId === "miniboss") {
         enemy.maxHp = Math.floor(enemy.maxHp * 1.45);
         enemy.hp = enemy.maxHp;
+        this.initializeMiniBossEncounterForEnemy(enemy);
       }
       if (enemy.typeId === "finalBoss") {
         enemy.maxHp = Math.floor(enemy.maxHp * 1.75);
@@ -4649,6 +5283,7 @@
 
       run.entities.enemies.push(enemy);
       this.markEnemyEncountered(enemy.typeId);
+      return enemy;
     }
 
     updateEnemies(dt) {
@@ -4748,13 +5383,7 @@
             }
           }
         } else if (enemy.behavior === "miniboss") {
-          enemy.x += dirX * speed * dt;
-          enemy.y += dirY * speed * dt;
-          if (enemy.shotTimer <= 0) {
-            this.spawnEnemyProjectile(enemy, player, DATA.ENEMIES.miniboss.projectileSpeed, enemy.damage);
-            this.spawnRadialProjectiles(enemy, 6, DATA.ENEMIES.miniboss.projectileSpeed * 0.8, enemy.damage * 0.75);
-            enemy.shotTimer = DATA.ENEMIES.miniboss.shotCooldown;
-          }
+          this.updateNecromancerMiniBoss(enemy, dt, dirX, dirY);
         } else if (enemy.behavior === "finalBoss") {
           const pulse = Math.sin(run.time * 0.9) * 0.15 + 0.85;
           enemy.x += dirX * speed * pulse * dt;
@@ -4801,6 +5430,164 @@
       });
 
       run.entities.enemies = enemies.filter((enemy) => !enemy.dead);
+      this.syncBossEncounterState();
+    }
+
+    updateNecromancerMiniBoss(enemy, dt, dirX, dirY) {
+      const run = this.currentRun;
+      if (!run || !enemy) return;
+      const config = this.getMiniBossEncounterConfig() || {};
+      const behaviorConfig = config.behavior || {};
+      if (!enemy.boss || typeof enemy.boss !== "object") {
+        enemy.boss = this.createMiniBossRuntimeState();
+      }
+      const bossState = enemy.boss;
+      const moveIdleMultiplier = Math.max(0, Number(behaviorConfig.idleMoveSpeedMultiplier || 0.5));
+      const moveCooldownMultiplier = Math.max(0, Number(behaviorConfig.cooldownMoveSpeedMultiplier || 0.34));
+
+      if (bossState.state === "casting") {
+        const castDuration = Math.max(1, Number(bossState.castDuration || 0));
+        const elapsedMs = Math.max(0, (run.time - Number(bossState.castStartTime || 0)) * 1000);
+        bossState.castElapsedMs = Math.min(castDuration, elapsedMs);
+        if (elapsedMs >= castDuration) {
+          const abilityConfig = bossState.currentAbility;
+          if (abilityConfig) {
+            this.executeMiniBossAbility(enemy, abilityConfig, bossState.castData || {});
+            bossState.cooldownTimer = Math.max(0, Number(abilityConfig.cooldownMs || 0) / 1000);
+          } else {
+            bossState.cooldownTimer = 0.5;
+          }
+          bossState.state = bossState.cooldownTimer > 0 ? "cooldown" : "idle";
+          bossState.currentAbility = null;
+          bossState.currentAbilityId = null;
+          bossState.castData = null;
+          bossState.castStartTime = 0;
+          bossState.castDuration = 0;
+          bossState.castElapsedMs = 0;
+        }
+        return;
+      }
+
+      const movementMultiplier = bossState.state === "cooldown" ? moveCooldownMultiplier : moveIdleMultiplier;
+      enemy.x += dirX * enemy.speed * movementMultiplier * dt;
+      enemy.y += dirY * enemy.speed * movementMultiplier * dt;
+
+      if (bossState.cooldownTimer > 0) {
+        bossState.cooldownTimer = Math.max(0, bossState.cooldownTimer - dt);
+        bossState.state = bossState.cooldownTimer > 0 ? "cooldown" : "idle";
+        return;
+      }
+
+      const nextAbility = this.selectNextMiniBossAbility(enemy, config);
+      if (!nextAbility) {
+        bossState.state = "idle";
+        return;
+      }
+      this.startMiniBossCast(enemy, nextAbility);
+    }
+
+    selectNextMiniBossAbility(enemy, miniBossConfig) {
+      if (!enemy || !enemy.boss) return null;
+      const config = miniBossConfig || this.getMiniBossEncounterConfig() || {};
+      const abilitiesById = config.abilities && typeof config.abilities === "object" ? config.abilities : {};
+      const abilityOrder = Array.isArray(config.abilityOrder) ? config.abilityOrder.filter(Boolean) : Object.keys(abilitiesById);
+      if (!abilityOrder.length) return null;
+
+      const index = Math.max(0, Number(enemy.boss.nextAbilityIndex || 0));
+      const abilityId = abilityOrder[index % abilityOrder.length];
+      enemy.boss.nextAbilityIndex = index + 1;
+      const abilityConfig = abilitiesById[abilityId];
+      if (!abilityConfig) return null;
+      return {
+        ...abilityConfig,
+        id: String(abilityConfig.id || abilityId)
+      };
+    }
+
+    buildMiniBossCastData(enemy, abilityConfig) {
+      const run = this.currentRun;
+      const castData = {};
+      if (!run || !enemy || !abilityConfig) return castData;
+      const telegraphType = String(abilityConfig.telegraphType || "").trim();
+      if (telegraphType === "line") {
+        castData.targetX = run.player.x;
+        castData.targetY = run.player.y;
+        castData.beamWidth = Math.max(4, Number(abilityConfig.beamWidth || 20));
+      } else if (telegraphType === "spawn") {
+        const arena = run.bossEncounter && run.bossEncounter.arena && run.bossEncounter.arena.active
+          ? run.bossEncounter.arena
+          : null;
+        const centerX = arena ? Number(arena.centerX || run.player.x) : run.player.x;
+        const centerY = arena ? Number(arena.centerY || run.player.y) : run.player.y;
+        const arenaRadius = arena
+          ? Math.min(Number(arena.width || run.world.width), Number(arena.height || run.world.height)) * 0.5
+          : Math.min(run.world.width, run.world.height) * 0.5;
+        const ringMultiplier = Math.max(0.2, Number(abilityConfig.spawnRingRadiusMultiplier || 0.46));
+        castData.centerX = centerX;
+        castData.centerY = centerY;
+        castData.spawnRingRadius = arenaRadius * ringMultiplier;
+      }
+      return castData;
+    }
+
+    startMiniBossCast(enemy, abilityConfig) {
+      const run = this.currentRun;
+      if (!run || !enemy || !enemy.boss || !abilityConfig) return;
+      enemy.boss.currentAbility = abilityConfig;
+      enemy.boss.currentAbilityId = abilityConfig.id;
+      enemy.boss.castStartTime = run.time;
+      enemy.boss.castDuration = Math.max(100, Number(abilityConfig.castTimeMs || 1000));
+      enemy.boss.castElapsedMs = 0;
+      enemy.boss.castData = this.buildMiniBossCastData(enemy, abilityConfig);
+      enemy.boss.state = "casting";
+      enemy.boss.cooldownTimer = 0;
+    }
+
+    executeMiniBossAbility(enemy, abilityConfig, castData) {
+      if (!enemy || !abilityConfig) return;
+      const abilityId = String(abilityConfig.id || "").trim();
+      if (abilityId === "summon_undead") {
+        this.executeSummonUndead(enemy, abilityConfig, castData);
+      } else if (abilityId === "ray_of_sickness") {
+        this.executeRayOfSickness(enemy, abilityConfig, castData);
+      }
+    }
+
+    executeSummonUndead(enemy, abilityConfig, castData) {
+      const run = this.currentRun;
+      if (!run || !enemy) return;
+      const summonCount = Math.max(1, Math.floor(Number(abilityConfig.summonCount || 8)));
+      const summonTypeId = String(abilityConfig.summonEnemyType || "grunt");
+      const centerX = Number.isFinite(Number(castData && castData.centerX)) ? Number(castData.centerX) : run.player.x;
+      const centerY = Number.isFinite(Number(castData && castData.centerY)) ? Number(castData.centerY) : run.player.y;
+      const ringRadius = Math.max(120, Number((castData && castData.spawnRingRadius) || Math.min(run.world.width, run.world.height) * 0.42));
+
+      for (let i = 0; i < summonCount; i += 1) {
+        const angle = (Math.PI * 2 * i) / summonCount + run.time * 0.2;
+        const spawnX = centerX + Math.cos(angle) * ringRadius;
+        const spawnY = centerY + Math.sin(angle) * ringRadius;
+        this.spawnEnemy(summonTypeId, run.time, {
+          position: { x: spawnX, y: spawnY },
+          forceInside: true,
+          speedMultiplier: 1.06
+        });
+      }
+    }
+
+    executeRayOfSickness(enemy, abilityConfig, castData) {
+      const run = this.currentRun;
+      if (!run || !enemy || !castData) return;
+      const targetX = Number(castData.targetX);
+      const targetY = Number(castData.targetY);
+      if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) return;
+
+      const beamWidth = Math.max(4, Number(castData.beamWidth || abilityConfig.beamWidth || 20));
+      const damageMultiplier = Math.max(0.1, Number(abilityConfig.beamDamageMultiplier || 1));
+      const player = run.player;
+      const playerDistance = pointToSegmentDistance(player.x, player.y, enemy.x, enemy.y, targetX, targetY);
+      if (playerDistance <= player.radius + beamWidth * 0.5) {
+        this.damagePlayer(enemy.damage * damageMultiplier);
+      }
     }
 
     getEnemyCollisionSettings(enemyTypeId) {
@@ -5283,7 +6070,10 @@
     generateUpgradeChoices() {
       const run = this.currentRun;
       const baseUpgrades = DATA.UPGRADES.filter(
-        (upgrade) => this.isUpgradeAvailable(run, upgrade) && this.canOfferUpgradeWithinSkillCap(run, upgrade)
+        (upgrade) =>
+          this.isWeaponUpgradeAllowedForRun(run, upgrade) &&
+          this.isUpgradeAvailable(run, upgrade) &&
+          this.canOfferUpgradeWithinSkillCap(run, upgrade)
       );
       const classSkillChoices = this.generateClassSkillUpgradeChoices(run).filter((option) =>
         this.canOfferUpgradeWithinSkillCap(run, option)
@@ -5774,7 +6564,7 @@
             : 6,
         type,
         value: Math.max(1, Math.floor(value || 1)),
-        spriteRotation: type === "xp" ? Math.random() * 0.6 - 0.3 : 0
+        spriteRotation: type === "xp" ? Math.random() * Math.PI * 2 : 0
       };
       if (type === "item") {
         pickup.item = opts.item || null;
@@ -5919,6 +6709,8 @@
       this.drawBackgroundGrid(width, height);
       this.drawFixedWorldGuides();
       this.drawObstacles();
+      this.drawBossArenaBoundary();
+      this.drawBossTelegraphs();
       this.drawPickups();
       this.drawOffscreenPowerupIndicators();
       this.drawPlayerProjectiles();
@@ -5926,21 +6718,25 @@
       this.drawEnemies();
       this.drawPlayer();
       this.drawAttackEffects();
-      this.drawTopTimers();
-      this.drawSwarmBanner();
       this.drawVictoryCountdown();
 
       ctx.restore();
+      this.drawBossEncounterUi(viewport);
     }
 
     drawBackgroundGrid(width, height) {
       const ctx = this.ctx;
+      const run = this.currentRun;
       ctx.fillStyle = "#10151d";
       ctx.fillRect(0, 0, width, height);
+      const hasBackground = this.drawRunMapBackground(run && run.mapBackground, width, height);
       ctx.strokeStyle = "rgba(55, 70, 95, 0.28)";
+      if (hasBackground) {
+        ctx.strokeStyle = "rgba(55, 70, 95, 0.2)";
+      }
       ctx.lineWidth = 1;
       const spacing = 48;
-      const worldOffset = this.currentRun.worldOffset || { x: 0, y: 0 };
+      const worldOffset = run && run.worldOffset ? run.worldOffset : { x: 0, y: 0 };
       const offsetX = ((worldOffset.x % spacing) + spacing) % spacing;
       const offsetY = ((worldOffset.y % spacing) + spacing) % spacing;
 
@@ -6027,10 +6823,181 @@
       });
     }
 
+    drawBossArenaBoundary() {
+      const run = this.currentRun;
+      if (!run || !run.bossEncounter || !run.bossEncounter.arena) return;
+      const arena = run.bossEncounter.arena;
+      if (!arena.active) return;
+      const halfW = Math.max(1, Number(arena.width || 0) * 0.5);
+      const halfH = Math.max(1, Number(arena.height || 0) * 0.5);
+      const left = Number(arena.centerX || 0) - halfW;
+      const top = Number(arena.centerY || 0) - halfH;
+      const width = halfW * 2;
+      const height = halfH * 2;
+
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.fillStyle = String(arena.fillColor || "rgba(120, 14, 14, 0.06)");
+      ctx.fillRect(left, top, width, height);
+      ctx.strokeStyle = String(arena.borderColor || "rgba(228, 70, 70, 0.95)");
+      ctx.lineWidth = Math.max(1, Number(arena.lineWidth || 3));
+      ctx.strokeRect(left, top, width, height);
+      ctx.restore();
+    }
+
+    drawBossTelegraphs() {
+      const run = this.currentRun;
+      if (!run || !run.entities || !Array.isArray(run.entities.enemies)) return;
+      const ctx = this.ctx;
+
+      run.entities.enemies.forEach((enemy) => {
+        if (!enemy || enemy.dead || enemy.typeId !== "miniboss" || !enemy.boss) return;
+        const boss = enemy.boss;
+        if (boss.state !== "casting" || !boss.currentAbility) return;
+        const ability = boss.currentAbility;
+        const telegraphType = String(ability.telegraphType || "").trim();
+        const castDuration = Math.max(1, Number(boss.castDuration || 1));
+        const elapsedMs = Math.max(0, Number(boss.castElapsedMs || 0));
+        const remainingMs = Math.max(0, castDuration - elapsedMs);
+        const castPct = clamp(elapsedMs / castDuration, 0, 1);
+
+        if (telegraphType === "line") {
+          const castData = boss.castData || {};
+          const targetX = Number(castData.targetX);
+          const targetY = Number(castData.targetY);
+          if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) return;
+          const flashWindow = Math.max(40, Number(ability.flashWindowMs || 200));
+          const inFlashWindow = remainingMs <= flashWindow;
+          const baseWidth = Math.max(2, Number(ability.beamWidth || 20) * 0.22);
+          const lineWidth = inFlashWindow ? baseWidth * 1.85 : baseWidth;
+          const alpha = inFlashWindow ? 0.92 : 0.42 + castPct * 0.26;
+
+          ctx.save();
+          ctx.strokeStyle = inFlashWindow
+            ? String(ability.flashColor || "rgba(232, 255, 182, 0.98)")
+            : String(ability.telegraphColor || "rgba(166, 255, 126, 0.82)");
+          ctx.globalAlpha = clamp(alpha, 0.08, 1);
+          ctx.lineWidth = lineWidth;
+          ctx.beginPath();
+          ctx.moveTo(enemy.x, enemy.y);
+          ctx.lineTo(targetX, targetY);
+          ctx.stroke();
+          ctx.restore();
+          return;
+        }
+
+        if (telegraphType === "spawn") {
+          const castData = boss.castData || {};
+          const centerX = Number.isFinite(Number(castData.centerX)) ? Number(castData.centerX) : run.player.x;
+          const centerY = Number.isFinite(Number(castData.centerY)) ? Number(castData.centerY) : run.player.y;
+          const radius = Math.max(40, Number(castData.spawnRingRadius || 200));
+
+          ctx.save();
+          ctx.lineWidth = 2;
+          ctx.setLineDash([10, 8]);
+          ctx.strokeStyle = String(ability.telegraphColor || "rgba(178, 235, 208, 0.9)");
+          ctx.globalAlpha = 0.5 + castPct * 0.4;
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.setLineDash([]);
+          ctx.fillStyle = String(ability.telegraphFillColor || "rgba(98, 218, 168, 0.1)");
+          ctx.globalAlpha = 0.08 + castPct * 0.12;
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      });
+    }
+
+    drawBossEncounterUi(viewport) {
+      const run = this.currentRun;
+      if (!run || run.ended) return;
+      const activeBoss = this.getActiveMiniBoss(run);
+      if (!activeBoss || !activeBoss.boss) return;
+
+      const bossState = activeBoss.boss;
+      const config = this.getMiniBossEncounterConfig() || {};
+      const uiConfig = config.ui || {};
+      const ctx = this.ctx;
+      const screenWidth = Number((viewport && viewport.screenWidth) || this.canvas.width || 0);
+      if (screenWidth <= 0) return;
+
+      const panelWidth = Math.min(560, Math.max(280, screenWidth * 0.72));
+      const panelHeight = 52;
+      const panelX = (screenWidth - panelWidth) * 0.5;
+      const panelY = 12;
+      const healthRatio = clamp(Number(activeBoss.hp || 0) / Math.max(1, Number(activeBoss.maxHp || 1)), 0, 1);
+
+      ctx.save();
+      ctx.fillStyle = "rgba(10, 14, 20, 0.9)";
+      ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
+      ctx.strokeStyle = "rgba(220, 97, 97, 0.92)";
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(panelX, panelY, panelWidth, panelHeight);
+
+      ctx.fillStyle = "#f4d6d6";
+      ctx.font = "bold 13px Trebuchet MS, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      const className = String(bossState.className || config.className || "Boss");
+      const bossName = String(bossState.name || activeBoss.label || DATA.ENEMIES.miniboss.label || "Mini Boss");
+      ctx.fillText(`[${className}] - ${bossName}`, panelX + 10, panelY + 12);
+
+      const healthBarX = panelX + 10;
+      const healthBarY = panelY + 19;
+      const healthBarW = panelWidth - 20;
+      const healthBarH = 11;
+      ctx.fillStyle = "rgba(40, 24, 26, 0.85)";
+      ctx.fillRect(healthBarX, healthBarY, healthBarW, healthBarH);
+      ctx.fillStyle = String(uiConfig.healthBarColor || "#cc2f4f");
+      ctx.fillRect(healthBarX, healthBarY, healthBarW * healthRatio, healthBarH);
+
+      if (bossState.state === "casting" && bossState.currentAbility) {
+        const abilityName = String(bossState.currentAbility.name || "Casting");
+        const castDuration = Math.max(1, Number(bossState.castDuration || 1));
+        const castProgress = clamp(Number(bossState.castElapsedMs || 0) / castDuration, 0, 1);
+        const castBarX = panelX + 10;
+        const castBarY = panelY + 35;
+        const castBarW = panelWidth - 20;
+        const castBarH = 8;
+
+        ctx.fillStyle = "#dce6f0";
+        ctx.font = "11px Trebuchet MS, sans-serif";
+        ctx.fillText(`Casting: ${abilityName}`, castBarX, castBarY - 6);
+        ctx.fillStyle = "rgba(26, 30, 36, 0.88)";
+        ctx.fillRect(castBarX, castBarY, castBarW, castBarH);
+        ctx.fillStyle = String(uiConfig.castBarColor || "#8dd773");
+        ctx.fillRect(castBarX, castBarY, castBarW * castProgress, castBarH);
+      }
+
+      ctx.restore();
+    }
+
     drawPlayer() {
       const run = this.currentRun;
       const ctx = this.ctx;
       const player = run.player;
+      // Draw frenzy glow behind the character.
+      const bloodFrenzy = run.classSkills && run.classSkills.bloodFrenzy ? run.classSkills.bloodFrenzy : null;
+      if (bloodFrenzy && bloodFrenzy.unlocked && Number(bloodFrenzy.activeTimer || 0) > 0) {
+        const pulse = Math.sin(run.time * 9) * 0.5 + 0.5;
+        const centerX = player.x;
+        const centerY = player.y + player.radius * 0.35;
+        const outerRadius = player.radius + 14 + pulse * 5;
+        const innerRadius = Math.max(1, player.radius * 0.45);
+        const glow = ctx.createRadialGradient(centerX, centerY, innerRadius, centerX, centerY, outerRadius);
+        glow.addColorStop(0, `rgba(255, 88, 88, ${(0.34 + pulse * 0.16).toFixed(3)})`);
+        glow.addColorStop(0.55, `rgba(255, 76, 76, ${(0.18 + pulse * 0.08).toFixed(3)})`);
+        glow.addColorStop(1, "rgba(255, 70, 70, 0)");
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, outerRadius * 0.82, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       const blink = player.invulnTimer > 0 && Math.floor(run.time * 25) % 2 === 0;
       if (blink) {
         ctx.globalAlpha = 0.45;
@@ -6044,18 +7011,6 @@
         ctx.fill();
       }
       ctx.globalAlpha = 1;
-
-      const bloodFrenzy = run.classSkills && run.classSkills.bloodFrenzy ? run.classSkills.bloodFrenzy : null;
-      if (bloodFrenzy && bloodFrenzy.unlocked && Number(bloodFrenzy.activeTimer || 0) > 0) {
-        const pulse = Math.sin(run.time * 9) * 0.5 + 0.5;
-        const auraRadius = player.radius + 7 + pulse * 4;
-        ctx.strokeStyle = `rgba(255, 92, 92, ${(0.22 + pulse * 0.2).toFixed(3)})`;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(player.x, player.y, auraRadius, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-
     }
 
     drawEnemies() {
@@ -6543,34 +7498,99 @@
 
     drawAttackEffects() {
       const ctx = this.ctx;
+      const axeSprite = this.getAttackEffectSprite("axe");
       this.currentRun.entities.attackEffects.forEach((effect) => {
-        const alpha = clamp(effect.remaining / effect.duration, 0, 1) * 0.65;
+        const duration = Math.max(0.0001, Number(effect.duration || 0.0001));
+        const remaining = Math.max(0, Number(effect.remaining || 0));
+        const lifePct = clamp(remaining / duration, 0, 1);
+        const progress = clamp(1 - lifePct, 0, 1);
+        const baseAlpha = lifePct * 0.65;
+        const visualSpriteId = String(effect && effect.visualSpriteId ? effect.visualSpriteId : "").trim();
+        const visualSprite = visualSpriteId ? this.getAttackEffectSprite(visualSpriteId) : null;
+
+        if (visualSprite) {
+          const visualSize = Math.max(22, Number(effect.visualSize || Math.max(64, Number(effect.radius || 0) * 1.4)));
+          const visualRotationSpeed = Number(effect.visualRotationSpeed || 0);
+          const visualRotation = Number(effect.visualRotation || 0) + visualRotationSpeed * progress;
+          const drawX = Number(effect.x || 0);
+          const drawY = Number(effect.y || 0);
+          const previousSmoothing = ctx.imageSmoothingEnabled;
+
+          ctx.save();
+          ctx.imageSmoothingEnabled = false;
+          ctx.globalAlpha = clamp(lifePct * 0.96, 0, 1);
+          ctx.translate(drawX, drawY);
+          if (visualRotation !== 0) ctx.rotate(visualRotation);
+          ctx.drawImage(visualSprite, -visualSize * 0.5, -visualSize * 0.5, visualSize, visualSize);
+          ctx.restore();
+          ctx.imageSmoothingEnabled = previousSmoothing;
+        }
+
+        if (effect && effect.noStroke) {
+          return;
+        }
+
+        const isSecondaryMelee = effect && effect.meleeSlot === "secondaryMeleeWeapon";
+        const shouldDrawAxeSwipe = Boolean(effect && effect.weaponEffectId === "axe" && axeSprite);
         const customStroke =
           effect && typeof effect.strokeColor === "string"
-            ? effect.strokeColor.replace("ALPHA", alpha.toFixed(3))
+            ? effect.strokeColor.replace("ALPHA", baseAlpha.toFixed(3))
             : "";
-        if (customStroke) {
-          ctx.strokeStyle = customStroke;
-        } else {
-          const isSecondaryMelee = effect && effect.meleeSlot === "secondaryMeleeWeapon";
-          ctx.strokeStyle = isSecondaryMelee
-            ? `rgba(235, 82, 82, ${alpha.toFixed(3)})`
-            : `rgba(255, 168, 100, ${alpha.toFixed(3)})`;
+        const strokeColor = customStroke
+          ? customStroke
+          : isSecondaryMelee
+            ? `rgba(235, 82, 82, ${baseAlpha.toFixed(3)})`
+            : `rgba(255, 168, 100, ${baseAlpha.toFixed(3)})`;
+        const halfArc = Math.max(0.02, Number(effect.arc || 0) * 0.5);
+        const startAngle = Number(effect.centerAngle || 0) - halfArc;
+        const endAngle = Number(effect.centerAngle || 0) + halfArc;
+
+        if (!shouldDrawAxeSwipe) {
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          if (effect.didSpin) {
+            ctx.arc(effect.x, effect.y, effect.radius, 0, Math.PI * 2);
+          } else {
+            ctx.arc(effect.x, effect.y, effect.radius, startAngle, endAngle);
+          }
+          ctx.stroke();
         }
-        ctx.lineWidth = 7;
-        ctx.beginPath();
-        if (effect.didSpin) {
-          ctx.arc(effect.x, effect.y, effect.radius, 0, Math.PI * 2);
-        } else {
-          ctx.arc(
-            effect.x,
-            effect.y,
-            effect.radius,
-            effect.centerAngle - effect.arc * 0.5,
-            effect.centerAngle + effect.arc * 0.5
-          );
+        if (!shouldDrawAxeSwipe) return;
+
+        const sweepDirection = Number(effect.sweepDirection || (isSecondaryMelee ? -1 : 1)) >= 0 ? 1 : -1;
+        const sweepAngle = effect.didSpin
+          ? Number(effect.centerAngle || 0) + sweepDirection * progress * Math.PI * 2 * 1.12
+          : startAngle + (endAngle - startAngle) * (sweepDirection > 0 ? progress : 1 - progress);
+        const orbitRadius = Math.max(14, Number(effect.radius || 0));
+        const iconX = Number(effect.x || 0) + Math.cos(sweepAngle) * orbitRadius;
+        const iconY = Number(effect.y || 0) + Math.sin(sweepAngle) * orbitRadius;
+
+        const sourceW = Math.max(1, Number(axeSprite.naturalWidth || 1));
+        const sourceH = Math.max(1, Number(axeSprite.naturalHeight || 1));
+        const aspect = sourceW / sourceH;
+        const iconHeight = Math.max(16, Math.min(44, orbitRadius * 0.38));
+        const iconWidth = iconHeight * aspect;
+        const iconRotation =
+          sweepAngle + Math.PI * 0.5 + (effect.didSpin ? sweepDirection * progress * 0.8 : 0);
+        const swingGlow = isSecondaryMelee ? "rgba(232, 70, 70, 0.75)" : "rgba(255, 156, 66, 0.72)";
+        const previousSmoothing = ctx.imageSmoothingEnabled;
+
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        ctx.globalAlpha = clamp(0.12 + lifePct * 0.96, 0, 1);
+        ctx.translate(iconX, iconY);
+        ctx.rotate(iconRotation);
+        ctx.shadowColor = swingGlow;
+        ctx.shadowBlur = 4;
+        ctx.drawImage(axeSprite, -iconWidth * 0.5, -iconHeight * 0.5, iconWidth, iconHeight);
+        if (isSecondaryMelee) {
+          ctx.globalCompositeOperation = "source-atop";
+          ctx.fillStyle = "rgba(255, 84, 84, 0.28)";
+          ctx.fillRect(-iconWidth * 0.5, -iconHeight * 0.5, iconWidth, iconHeight);
         }
-        ctx.stroke();
+        ctx.restore();
+        ctx.imageSmoothingEnabled = previousSmoothing;
       });
     }
 

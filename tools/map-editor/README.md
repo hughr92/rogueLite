@@ -1,50 +1,63 @@
-# RL Map Editor (MVP)
+# RL Map Editor (V1)
 
-Standalone browser tool for creating and iterating intentional map layouts.
+Standalone browser tool for brush-based map authoring with theme-aware terrain rendering.
 
 ## Open
 
 1. Open `tools/map-editor/index.html` in your browser.
-2. Use the top bar actions for file/local load-save.
+2. Use top bar actions for open/save/local slots.
 
 No install/build step is required.
 
-## Workflow
+## Core Workflow
 
-1. Set map metadata (`id`, `name`, `width`, `height`, `default theme`).
-2. Place terrain objects with `Terrain` tool.
-3. Draw non-walkable perimeters with `Boundary` tool.
-4. Add bridge-like traversal points with `Crossing` tool.
-5. Use `Validate` and fix issues before export.
-6. Export JSON with `Save File` or `Copy JSON`.
+1. Pick a level slot (`Editing Level`) and set map metadata (`id`, `name`, `width`, `height`, `theme`).
+2. Choose a terrain type (`ground`, `water`, `path`, `trees`, `walls`).
+3. Paint with click-drag using brush controls (`size`, `density`, `randomness`, `softness`).
+4. Use `River/Path` to draw flowing lines that fill terrain along the stroke.
+5. Import a background image and tune opacity/scale/offset for tracing.
+6. Paint a `Play Area` mask to define visible playable regions.
+7. Validate and export JSON.
 
-## Core Controls
+## Tools
 
-- `Select`: pick, drag, and edit objects
-- `Terrain`: click to place
-- `Boundary`: click points, double-click or `Enter` to finalize
-- `Crossing`: click to place (must align with boundary edge)
-- `Delete`: click to remove
-- `Pan`: middle mouse drag, or hold `Space` + drag
-- `Zoom`: mouse wheel
-- `Duplicate`: `Ctrl + D`
-- `Delete Selected`: `Delete` key
-- `Cancel Boundary Draft`: `Escape`
+- `Select`: select and move terrain stamps
+- `Paint`: paint terrain with brush
+- `River/Path`: draw continuous path/water strokes
+- `Play Area`: paint playable mask (right-click to erase)
+- `Play Area Rect`: click-drag rectangle for full playable field (right-click drag removes)
+- `Eraser`: remove terrain
 
-## Data Contract
+## Layer Toggles
 
-Exported map JSON:
+- Grid
+- Background
+- Terrain
+- Props
+- Play Area Overlay
+- Collision/Walls
+
+## Data Model (Export)
 
 - `id`
+- `levelId`
 - `name`
 - `width`
 - `height`
-- `defaultThemeId`
-- `terrainObjects[]`:
-  - `id`, `type`, `x`, `y`, `rotation`, `scale`
-- `boundaries[]`:
-  - `id`, `blocksPlayer`, `blocksEnemies`, `polygonPoints[]`
-- `crossings[]`:
-  - `id`, `type`, `x`, `y`, `orientation`, `width`, `length`
+- `theme`
+- `terrain[]`
+- `props[]`
+- `playAreaMask[]`
+- `backgroundImage`
 
-Use `tools/map-editor/maps/level-1-sample.json` as a reference.
+Compatibility fields (`terrainObjects`, `boundaries`, `crossings`) are also included in output for legacy workflows.
+
+## Shortcuts
+
+- `1..7` switch tools
+- `Ctrl+Z` undo
+- `Ctrl+Y` or `Ctrl+Shift+Z` redo
+- `Ctrl+D` duplicate selected stamp
+- `Delete` remove selected stamp
+- `Space + Drag` pan camera
+- Mouse wheel zoom
