@@ -7,34 +7,41 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <details id="settingsMenu" class="settings-menu">
+    <summary id="settingsMenuToggle" class="btn settings-menu-toggle" title="Settings" aria-label="Settings">&#9881;</summary>
+    <div class="settings-menu-panel">
+      <div class="level-selector-title">Audio</div>
+      <div class="audio-settings-row">
+        <label for="bgmVolumeInput">Music Volume</label>
+        <input id="bgmVolumeInput" type="range" min="0" max="100" step="1" value="42">
+        <span id="bgmVolumeValue" class="audio-settings-value">42%</span>
+      </div>
+      <label class="audio-mute-toggle">
+        <input id="bgmMuteChk" type="checkbox">
+        Mute Music
+      </label>
+    </div>
+  </details>
+
   <main id="appRoot">
     <section id="homeScreen" class="screen">
       <div class="panel home-panel">
         <h1>Barbarian Last Stand</h1>
         <p class="subtitle">Human Barbarian survival prototype</p>
-        <div class="level-selector-block">
-          <div class="level-selector-title">Level Select</div>
-          <div id="levelSelector" class="level-selector"></div>
-        </div>
-        <div class="level-selector-block">
-          <div class="level-selector-title">Difficulty</div>
-          <div id="difficultySelector" class="level-selector"></div>
-        </div>
-        <div class="audio-settings-block">
-          <div class="level-selector-title">Audio</div>
-          <div class="audio-settings-row">
-            <label for="bgmVolumeInput">Music Volume</label>
-            <input id="bgmVolumeInput" type="range" min="0" max="100" step="1" value="42">
-            <span id="bgmVolumeValue" class="audio-settings-value">42%</span>
+        <div class="level-settings-row">
+          <div class="level-selector-block">
+            <div class="level-selector-title">Level Select</div>
+            <div id="levelSelector" class="level-selector"></div>
           </div>
-          <label class="audio-mute-toggle">
-            <input id="bgmMuteChk" type="checkbox">
-            Mute Music
-          </label>
+          <div class="level-selector-block">
+            <div class="level-selector-title">Difficulty</div>
+            <div id="difficultySelector" class="level-selector level-selector-dropdown"></div>
+          </div>
         </div>
         <div class="home-actions">
           <button id="createCharacterBtn" class="btn">Create Character</button>
           <button id="startRunBtn" class="btn btn-primary" disabled>Start Run</button>
+          <div id="startRunXpWarning" class="start-run-xp-warning hidden"></div>
         </div>
         <p id="homeStatus" class="status">Create a character to begin.</p>
       </div>
@@ -69,6 +76,7 @@
     </section>
 
     <section id="gameScreen" class="screen hidden">
+      <button id="gameAudioSettingsBtn" class="btn game-settings-btn" type="button" title="Audio Settings" aria-label="Audio Settings">&#9881;</button>
       <canvas id="gameCanvas"></canvas>
       <div id="roundTimerHud" class="round-timer-hud">
         <span id="roundTimerHudLabel">00:00</span>
@@ -129,8 +137,7 @@
 
   <div id="levelUpOverlay" class="overlay hidden">
     <div class="overlay-card wide">
-      <h2>Level Up</h2>
-      <p>Choose one upgrade</p>
+      <h2 id="levelUpTitle">Level 1</h2>
       <div id="levelUpOptions" class="upgrade-options"></div>
     </div>
   </div>
@@ -138,14 +145,6 @@
   <div id="pauseOverlay" class="overlay hidden">
     <div class="overlay-card">
       <h2>Paused</h2>
-      <div class="audio-settings-block pause-audio-settings-block">
-        <div class="level-selector-title">Audio</div>
-        <div class="audio-settings-row">
-          <label for="bgmVolumeInputPause">Music Volume</label>
-          <input id="bgmVolumeInputPause" type="range" min="0" max="100" step="1" value="42">
-          <span id="bgmVolumeValuePause" class="audio-settings-value">42%</span>
-        </div>
-      </div>
       <div class="overlay-actions column">
         <button id="resumeBtn" class="btn btn-primary">Resume</button>
         <button id="restartBtn" class="btn">Restart Run</button>

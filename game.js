@@ -107,6 +107,10 @@
     musicMuted: false
   });
   const MUSIC_BOSS_CROSSFADE_SECONDS = 1.2;
+  const LEVEL_BACKGROUND_MUSIC_OPTIONS = Object.freeze({
+    1: [1, 2]
+  });
+  const DEFAULT_MUSIC_LEVEL_INDEX = 1;
   const FIXED_WORLD_TILE_SIZE = 48;
   const FIXED_WORLD_TILES_WIDE = 20;
   const FIXED_WORLD_TILES_TALL = 20;
@@ -138,15 +142,18 @@
       this.terrainTypes = this.getTerrainTypeCatalog();
       this.obstacleSprites = this.createObstacleSprites(this.terrainTypes);
       this.chestSprites = this.createChestSprites();
+      this.pickupSprites = this.createPickupSprites();
       this.characterSprites = this.createCharacterSprites();
       this.enemySprites = this.createEnemySprites();
       this.enemyProjectileSprites = this.createEnemyProjectileSprites();
       this.audioSettings = this.loadAudioSettings();
-      this.backgroundMusicTracks = this.createBackgroundMusicTracks();
+      this.backgroundMusicTracks = this.createBackgroundMusicTracksForLevel(DEFAULT_MUSIC_LEVEL_INDEX);
       this.musicState = {
         bossBlend: 0,
         targetBossBlend: 0,
-        crossfadeSeconds: MUSIC_BOSS_CROSSFADE_SECONDS
+        crossfadeSeconds: MUSIC_BOSS_CROSSFADE_SECONDS,
+        baseTrackIndex: 0,
+        activeLevelIndex: DEFAULT_MUSIC_LEVEL_INDEX
       };
       this.renderViewport = {
         screenWidth: 1,
@@ -164,23 +171,142 @@
       this.boundResize = this.handleResize.bind(this);
     }
 
-    createMusicTrack(src) {
+    createMusicTrack(src, options) {
       if (typeof Audio === "undefined") return null;
+      const config = options && typeof options === "object" ? options : {};
       const audio = new Audio(src);
-      audio.loop = true;
+      audio.loop = Boolean(config.loop);
       audio.preload = "auto";
       return audio;
     }
 
-    createBackgroundMusicTracks() {
-      const base = this.createMusicTrack("assets/music/game/background_1.mp3");
-      const boss = this.createMusicTrack("assets/music/game/background_1_boss.mp3");
-      return { base, boss };
+    getBackgroundMusicPlaylistSources(levelIndex) {
+      const normalizedLevel = Math.max(1, Math.floor(Number(levelIndex || DEFAULT_MUSIC_LEVEL_INDEX)));
+      const hasLevelOptions = Object.prototype.hasOwnProperty.call(LEVEL_BACKGROUND_MUSIC_OPTIONS, normalizedLevel);
+      const sourceLevel = hasLevelOptions ? normalizedLevel : DEFAULT_MUSIC_LEVEL_INDEX;
+      const optionIds = Array.isArray(LEVEL_BACKGROUND_MUSIC_OPTIONS[sourceLevel])
+        ? LEVEL_BACKGROUND_MUSIC_OPTIONS[sourceLevel]
+        : [1];
+      const uniqueOptionIds = [];
+      optionIds.forEach((rawOptionId) => {
+        const optionId = Math.max(1, Math.floor(Number(rawOptionId || 0)));
+        if (!uniqueOptionIds.includes(optionId)) uniqueOptionIds.push(optionId);
+      });
+      if (!uniqueOptionIds.length) {
+        return [`assets/music/game/background_${sourceLevel}.mp3`];
+      }
+      return uniqueOptionIds.map((optionId) => `assets/music/game/background_${sourceLevel}_${optionId}.mp3`);
+    }
+
+    getBossMusicSourceForLevel(levelIndex) {
+      const normalizedLevel = Math.max(1, Math.floor(Number(levelIndex || DEFAULT_MUSIC_LEVEL_INDEX)));
+      const hasLevelOptions = Object.prototype.hasOwnProperty.call(LEVEL_BACKGROUND_MUSIC_OPTIONS, normalizedLevel);
+      const sourceLevel = hasLevelOptions ? normalizedLevel : DEFAULT_MUSIC_LEVEL_INDEX;
+      return `assets/music/game/background_${sourceLevel}_boss.mp3`;
+    }
+
+    createBackgroundMusicTracksForLevel(levelIndex) {
+      const normalizedLevel = Math.max(1, Math.floor(Number(levelIndex || DEFAULT_MUSIC_LEVEL_INDEX)));
+      const playlistSources = this.getBackgroundMusicPlaylistSources(normalizedLevel);
+      const basePlaylist = playlistSources
+        .map((src) => this.createMusicTrack(src, { loop: false }))
+        .filter(Boolean);
+      basePlaylist.forEach((track, index) => {
+        track.addEventListener("ended", () => {
+          this.onBaseMusicTrackEnded(index);
+        });
+        track.addEventListener("error", () => {
+          this.onBaseMusicTrackError(index);
+        });
+      });
+
+      const boss = this.createMusicTrack(this.getBossMusicSourceForLevel(normalizedLevel), { loop: true });
+      return {
+        levelIndex: normalizedLevel,
+        basePlaylist,
+        boss
+      };
     }
 
     getBackgroundMusicTracksList() {
       const tracks = this.backgroundMusicTracks || {};
-      return [tracks.base, tracks.boss].filter(Boolean);
+      const playlist = Array.isArray(tracks.basePlaylist) ? tracks.basePlaylist : [];
+      return [...playlist, tracks.boss].filter(Boolean);
+    }
+
+    getCurrentMusicLevelIndex() {
+      const runLevelIndex = this.currentRun && this.currentRun.level ? Number(this.currentRun.level.index) : NaN;
+      if (!Number.isNaN(runLevelIndex) && runLevelIndex > 0) {
+        return Math.max(1, Math.floor(runLevelIndex));
+      }
+      const selectedLevelIndex = (() => {
+        const selectedLevel = Array.isArray(DATA.LEVELS)
+          ? DATA.LEVELS.find((level) => level && level.id === this.selectedLevelId)
+          : null;
+        return selectedLevel ? Number(selectedLevel.index) : NaN;
+      })();
+      if (!Number.isNaN(selectedLevelIndex) && selectedLevelIndex > 0) {
+        return Math.max(1, Math.floor(selectedLevelIndex));
+      }
+      return DEFAULT_MUSIC_LEVEL_INDEX;
+    }
+
+    ensureBackgroundMusicTracksForCurrentLevel() {
+      const desiredLevelIndex = this.getCurrentMusicLevelIndex();
+      const state = this.musicState || {};
+      const currentLevelIndex = Math.max(1, Math.floor(Number(state.activeLevelIndex || DEFAULT_MUSIC_LEVEL_INDEX)));
+      if (this.backgroundMusicTracks && currentLevelIndex === desiredLevelIndex) return;
+
+      this.stopBackgroundMusic();
+      this.backgroundMusicTracks = this.createBackgroundMusicTracksForLevel(desiredLevelIndex);
+      if (this.musicState) {
+        this.musicState.activeLevelIndex = desiredLevelIndex;
+        this.musicState.baseTrackIndex = 0;
+      }
+    }
+
+    getActiveBaseMusicTrack() {
+      const tracks = this.backgroundMusicTracks || {};
+      const playlist = Array.isArray(tracks.basePlaylist) ? tracks.basePlaylist : [];
+      if (!playlist.length) return null;
+      const index = Math.max(
+        0,
+        Math.min(playlist.length - 1, Math.floor(Number(this.musicState && this.musicState.baseTrackIndex) || 0))
+      );
+      if (this.musicState) {
+        this.musicState.baseTrackIndex = index;
+      }
+      return playlist[index] || null;
+    }
+
+    onBaseMusicTrackEnded(index) {
+      const state = this.musicState || {};
+      const currentIndex = Math.floor(Number(state.baseTrackIndex || 0));
+      if (index !== currentIndex) return;
+      this.advanceBaseMusicTrack();
+    }
+
+    onBaseMusicTrackError(index) {
+      const state = this.musicState || {};
+      const currentIndex = Math.floor(Number(state.baseTrackIndex || 0));
+      if (index !== currentIndex) return;
+      this.advanceBaseMusicTrack();
+    }
+
+    advanceBaseMusicTrack() {
+      const tracks = this.backgroundMusicTracks || {};
+      const playlist = Array.isArray(tracks.basePlaylist) ? tracks.basePlaylist : [];
+      if (!playlist.length || !this.musicState) return;
+      const previousIndex = Math.max(0, Math.min(playlist.length - 1, Math.floor(Number(this.musicState.baseTrackIndex) || 0)));
+      const nextIndex = (previousIndex + 1) % playlist.length;
+      const previousTrack = playlist[previousIndex];
+      if (previousTrack) {
+        if (!previousTrack.paused) previousTrack.pause();
+        previousTrack.currentTime = 0;
+      }
+      this.musicState.baseTrackIndex = nextIndex;
+      this.syncMusicTrackVolumes();
+      this.playBackgroundMusic();
     }
 
     loadAudioSettings() {
@@ -229,17 +355,20 @@
 
     syncMusicTrackVolumes() {
       const tracks = this.backgroundMusicTracks || {};
-      const baseTrack = tracks.base || null;
+      const basePlaylist = Array.isArray(tracks.basePlaylist) ? tracks.basePlaylist : [];
+      const activeBaseTrack = this.getActiveBaseMusicTrack();
       const bossTrack = tracks.boss || null;
       const source = this.audioSettings && typeof this.audioSettings === "object" ? this.audioSettings : DEFAULT_AUDIO_SETTINGS;
       const baseVolume = clamp(Number(source.musicVolume), 0, 1);
       const muted = Boolean(source.musicMuted);
       const bossBlend = clamp(Number(this.musicState && this.musicState.bossBlend), 0, 1);
-
-      if (baseTrack) {
-        baseTrack.volume = baseVolume * (1 - bossBlend);
-        baseTrack.muted = muted;
-      }
+      const activeBaseVolume = baseVolume * (1 - bossBlend);
+      basePlaylist.forEach((track) => {
+        if (!track) return;
+        const isActive = track === activeBaseTrack;
+        track.volume = isActive ? activeBaseVolume : 0;
+        track.muted = muted;
+      });
       if (bossTrack) {
         bossTrack.volume = baseVolume * bossBlend;
         bossTrack.muted = muted;
@@ -266,18 +395,12 @@
     }
 
     getAudioSettingsControlSets() {
-      const homeSet = {
+      const settingsMenuSet = {
         volumeInput: document.getElementById("bgmVolumeInput"),
         volumeValue: document.getElementById("bgmVolumeValue"),
         muteChk: document.getElementById("bgmMuteChk")
       };
-      const pauseSet = {
-        volumeInput: document.getElementById("bgmVolumeInputPause"),
-        volumeValue: document.getElementById("bgmVolumeValuePause"),
-        muteChk: document.getElementById("bgmMuteChkPause")
-      };
-
-      return [homeSet, pauseSet].filter((set) => set.volumeInput && set.volumeValue);
+      return [settingsMenuSet].filter((set) => set.volumeInput && set.volumeValue);
     }
 
     syncAudioSettingsUi() {
@@ -322,28 +445,77 @@
       });
     }
 
+    wireInGameSettingsMenuButton() {
+      const menu = document.getElementById("settingsMenu");
+      const button = document.getElementById("gameAudioSettingsBtn");
+      if (!menu || !button) return;
+      button.addEventListener("click", () => {
+        menu.open = !menu.open;
+        if (menu.open) {
+          const volumeInput = document.getElementById("bgmVolumeInput");
+          if (volumeInput) volumeInput.focus();
+        }
+      });
+    }
+
     playBackgroundMusic() {
-      const tracks = this.getBackgroundMusicTracksList();
-      if (!tracks.length) return;
+      this.ensureBackgroundMusicTracksForCurrentLevel();
+      const tracks = this.backgroundMusicTracks || {};
+      const playlist = Array.isArray(tracks.basePlaylist) ? tracks.basePlaylist : [];
+      const activeBaseTrack = this.getActiveBaseMusicTrack();
+      const bossTrack = tracks.boss || null;
+      const bossShouldPlay = Boolean(
+        bossTrack &&
+          (Number(this.musicState && this.musicState.targetBossBlend) > 0 ||
+            Number(this.musicState && this.musicState.bossBlend) > 0.001)
+      );
+      this.syncMusicTrackVolumes();
+      if (!activeBaseTrack && !bossTrack) return;
       if (Boolean(this.audioSettings && this.audioSettings.musicMuted)) return;
       if (clamp(Number(this.audioSettings && this.audioSettings.musicVolume), 0, 1) <= 0.0001) return;
 
-      const runningTrack = tracks.find((track) => !track.paused && !track.ended);
-      const anchorTime = runningTrack ? Number(runningTrack.currentTime || 0) : Number((tracks[0] && tracks[0].currentTime) || 0);
+      const runningBaseTrack = playlist.find((track) => track && !track.paused && !track.ended) || null;
+      const anchorTime = runningBaseTrack
+        ? Number(runningBaseTrack.currentTime || 0)
+        : Number((activeBaseTrack && activeBaseTrack.currentTime) || 0);
 
-      tracks.forEach((track) => {
-        if (!track) return;
-        if (!Number.isNaN(anchorTime) && Math.abs(Number(track.currentTime || 0) - anchorTime) > 0.12) {
-          track.currentTime = anchorTime;
-        }
-        if (!track.paused && !track.ended) return;
-        const playResult = track.play();
-        if (playResult && typeof playResult.catch === "function") {
-          playResult.catch(() => {
-            // Autoplay restrictions can block playback until user interaction.
-          });
-        }
+      if (activeBaseTrack && !Number.isNaN(anchorTime) && Math.abs(Number(activeBaseTrack.currentTime || 0) - anchorTime) > 0.12) {
+        activeBaseTrack.currentTime = anchorTime;
+      }
+
+      playlist.forEach((track) => {
+        if (!track || track === activeBaseTrack) return;
+        if (!track.paused) track.pause();
       });
+
+      if (activeBaseTrack) {
+        if (activeBaseTrack.paused || activeBaseTrack.ended) {
+          const playResult = activeBaseTrack.play();
+          if (playResult && typeof playResult.catch === "function") {
+            playResult.catch(() => {
+              // Autoplay restrictions can block playback until user interaction.
+            });
+          }
+        }
+      }
+
+      if (bossTrack) {
+        if (bossShouldPlay) {
+          if (activeBaseTrack && Math.abs(Number(bossTrack.currentTime || 0) - Number(activeBaseTrack.currentTime || 0)) > 0.16) {
+            bossTrack.currentTime = Number(activeBaseTrack.currentTime || 0);
+          }
+          if (bossTrack.paused || bossTrack.ended) {
+            const bossPlayResult = bossTrack.play();
+            if (bossPlayResult && typeof bossPlayResult.catch === "function") {
+              bossPlayResult.catch(() => {
+                // Autoplay restrictions can block playback until user interaction.
+              });
+            }
+          }
+        } else if (!bossTrack.paused) {
+          bossTrack.pause();
+        }
+      }
     }
 
     stopBackgroundMusic() {
@@ -374,7 +546,12 @@
       if (!this.musicState) return;
       const run = this.currentRun;
       const hasBoss = run && !run.ended && this.hasActiveBossEncounter(run);
-      this.musicState.targetBossBlend = hasBoss ? 1 : 0;
+      const previousTarget = Number(this.musicState.targetBossBlend || 0);
+      const nextTarget = hasBoss ? 1 : 0;
+      this.musicState.targetBossBlend = nextTarget;
+      if (nextTarget > previousTarget) {
+        this.playBackgroundMusic();
+      }
     }
 
     updateMusicCrossfade(dt) {
@@ -419,6 +596,26 @@
         image.src = path;
         return image;
       });
+    }
+
+    createPickupSprites() {
+      if (typeof Image === "undefined") return {};
+      const sprites = {};
+      const goldCoin = new Image();
+      goldCoin.src = "assets/pickups/coin.png";
+      sprites.gold = goldCoin;
+      const xpGem = new Image();
+      xpGem.src = "assets/pickups/xpGem.png";
+      sprites.xp = xpGem;
+      return sprites;
+    }
+
+    getPickupSprite(typeId) {
+      if (!this.pickupSprites || typeof this.pickupSprites !== "object") return null;
+      const key = String(typeId || "").trim();
+      const image = key ? this.pickupSprites[key] : null;
+      if (!image || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      return image;
     }
 
     createEnemySprites() {
@@ -686,6 +883,7 @@
         onBuybackMerchantItem: (buybackId) => this.handleBuybackMerchantItem(buybackId),
         onClaimQuestReward: (questId) => this.handleClaimQuestReward(questId),
         onClaimBountyReward: (enemyTypeId) => this.handleClaimBountyReward(enemyTypeId),
+        onSetEquippedClassSkills: (skillIds) => this.handleSetEquippedClassSkills(skillIds),
         onResume: () => this.resumeRun(),
         onRestart: () => this.restartRun(),
         onReturnHome: () => this.returnHome(),
@@ -694,6 +892,7 @@
 
       this.installInputListeners();
       this.wireAudioSettingsControls();
+      this.wireInGameSettingsMenuButton();
       this.applyAudioSettings();
       this.handleResize();
       window.addEventListener("resize", this.boundResize);
@@ -974,6 +1173,22 @@
       return { level, difficulty };
     }
 
+    getRunLegacyXpEligibility(legacyLevel, completedLevelNumber, completedDifficulty) {
+      const playerLevel = Math.max(1, Math.floor(Number(legacyLevel || 1)));
+      const levelNumber = Math.max(1, Math.floor(Number(completedLevelNumber || 1)));
+      const difficulty = this.normalizeDifficulty(completedDifficulty);
+      const requiredScore = Math.max(0, playerLevel - 3);
+      const runScore = levelNumber + difficulty;
+      return {
+        eligible: runScore >= requiredScore,
+        playerLevel,
+        requiredScore,
+        runScore,
+        levelNumber,
+        difficulty
+      };
+    }
+
     getCharacterBestiaryDiscoverySet(character) {
       const discovered = (character && character.bestiaryDiscoveries) || {};
       const knownIds = Object.keys(discovered).filter((enemyTypeId) => discovered[enemyTypeId] === true);
@@ -1004,6 +1219,36 @@
       return config;
     }
 
+    getEquippedClassSkillIdsForCharacter(character, catalog) {
+      if (!character || !catalog || !Array.isArray(catalog.skills)) return [];
+      const classId = character.classId || character.class;
+      const availableIds = catalog.skills
+        .filter((skill) => {
+          if (!skill || typeof skill !== "object" || !skill.id) return false;
+          const classIds = Array.isArray(skill.classIds) ? skill.classIds : [];
+          if (!classIds.length) return true;
+          return classIds.includes(classId);
+        })
+        .map((skill) => String(skill.id || "").trim())
+        .filter((id) => id.length > 0);
+      const cap = Math.max(1, Math.floor(Number((DATA.RUN && DATA.RUN.maxSkillChoicesPerRun) || 4)));
+      const availableSet = new Set(availableIds);
+      const hasConfiguredList = Array.isArray(character.equippedClassSkillIds);
+      const configured = hasConfiguredList ? character.equippedClassSkillIds : [];
+      const seen = {};
+      const equipped = [];
+      configured.forEach((value) => {
+        const id = String(value || "").trim();
+        if (!id || seen[id] || !availableSet.has(id)) return;
+        seen[id] = true;
+        equipped.push(id);
+      });
+      if (!hasConfiguredList) {
+        return availableIds.slice(0, cap);
+      }
+      return equipped.slice(0, cap);
+    }
+
     getClassSkillDefinitionForRun(run, skillId) {
       if (!run || !skillId) return null;
       const catalog = this.getClassSkillCatalogForClass(run.classId);
@@ -1016,6 +1261,8 @@
     createRunClassSkillState(character) {
       const classId = character && (character.classId || character.class) ? character.classId || character.class : "";
       const catalog = this.getClassSkillCatalogForClass(classId);
+      const equippedSkillIds = this.getEquippedClassSkillIdsForCharacter(character, catalog);
+      const equippedSkillSet = new Set(equippedSkillIds);
       const state = {
         availableAtRunLevelById: {},
         metadataById: {},
@@ -1057,9 +1304,10 @@
 
       catalog.skills.forEach((skill) => {
         if (!skill || typeof skill !== "object" || !skill.id) return;
+        if (!equippedSkillSet.has(skill.id)) return;
         const classIds = Array.isArray(skill.classIds) ? skill.classIds : [];
         if (classIds.length && !classIds.includes(classId)) return;
-        const unlockRunLevel = Math.max(1, Math.floor(Number(skill.unlockLegacyLevel || 1)));
+        const unlockRunLevel = 1;
         state.availableAtRunLevelById[skill.id] = unlockRunLevel;
         state.metadataById[skill.id] = {
           id: skill.id,
@@ -1070,20 +1318,20 @@
           keybind: skill.keybind || "",
           unlockRunLevel
         };
-        state.unlockedIds[skill.id] = false;
+        state.unlockedIds[skill.id] = true;
         const baseValues = skill.baseValues && typeof skill.baseValues === "object" ? skill.baseValues : {};
         if (skill.id === "blood_frenzy") {
-          state.bloodFrenzy.unlocked = false;
+          state.bloodFrenzy.unlocked = true;
           state.bloodFrenzy.attackSpeedBonusPct = Math.max(0, Number(baseValues.attackSpeedBonusPct || 0));
           state.bloodFrenzy.durationSeconds = Math.max(0, Number(baseValues.durationSeconds || 0));
         } else if (skill.id === "sever_artery") {
-          state.severArtery.unlocked = false;
+          state.severArtery.unlocked = true;
           state.severArtery.maxStacks = Math.max(1, Math.floor(Number(baseValues.maxStacks || 3)));
           state.severArtery.damagePerStack = Math.max(0, Number(baseValues.damagePerStack || 0));
           state.severArtery.tickSeconds = Math.max(0.25, Number(baseValues.tickSeconds || 1));
           state.severArtery.durationSeconds = Math.max(0.5, Number(baseValues.durationSeconds || 4));
         } else if (skill.id === "ground_slam") {
-          state.groundSlam.unlocked = false;
+          state.groundSlam.unlocked = true;
           state.groundSlam.cooldownSeconds = Math.max(0.5, Number(baseValues.cooldownSeconds || 10));
           state.groundSlam.cooldownLeft = 0;
           state.groundSlam.coneRadians = clamp((Math.PI * Math.max(1, Number(baseValues.coneDegrees || 45))) / 180, 0.2, Math.PI * 2);
@@ -1091,7 +1339,7 @@
           state.groundSlam.damageMultiplier = Math.max(0.1, Number(baseValues.damageMultiplier || 0.85));
           state.groundSlam.stunSeconds = Math.max(0.1, Number(baseValues.stunSeconds || 0.5));
         } else if (skill.id === "war_cry") {
-          state.warCry.unlocked = false;
+          state.warCry.unlocked = true;
           state.warCry.cooldownSeconds = Math.max(0.5, Number(baseValues.cooldownSeconds || 14));
           state.warCry.cooldownLeft = 0;
           state.warCry.radius = Math.max(20, Number(baseValues.radius || 132));
@@ -1196,9 +1444,6 @@
       const metadataById = run.classSkills.metadataById && typeof run.classSkills.metadataById === "object"
         ? run.classSkills.metadataById
         : {};
-      const availableAtRunLevelById = run.classSkills.availableAtRunLevelById && typeof run.classSkills.availableAtRunLevelById === "object"
-        ? run.classSkills.availableAtRunLevelById
-        : {};
       const unlockedIds = run.classSkills.unlockedIds && typeof run.classSkills.unlockedIds === "object"
         ? run.classSkills.unlockedIds
         : {};
@@ -1209,11 +1454,7 @@
           const skillId = String(metadata.id || "").trim();
           if (!skillId) return false;
           if (unlockedIds[skillId] === true) return false;
-          const unlockRunLevel = Math.max(
-            1,
-            Math.floor(Number(availableAtRunLevelById[skillId] || metadata.unlockRunLevel || 1))
-          );
-          return run.progression.level >= unlockRunLevel;
+          return true;
         })
         .map((metadata) => {
           const skillId = String(metadata.id || "").trim();
@@ -1550,6 +1791,44 @@
           `${updated.name} is Legacy Lv.${updated.legacyLevel} with ${updated.attributePoints || 0} attribute points remaining.`
         );
       }
+    }
+
+    handleSetEquippedClassSkills(skillIds) {
+      const selected = this.getSelectedCharacter();
+      if (!selected) {
+        return { ok: false, error: "Select a character first." };
+      }
+      if (!SAVE.setEquippedClassSkills) {
+        return { ok: false, error: "Class skill loadouts are unavailable in this build." };
+      }
+
+      const result = SAVE.setEquippedClassSkills(selected.id, skillIds);
+      if (!result || !result.ok) {
+        const errorText = (result && result.error) || "Could not update class skill loadout.";
+        this.ui.setHomeStatus(errorText);
+        return { ok: false, error: errorText };
+      }
+
+      this.characters = SAVE.listCharacters();
+      const refreshed = this.getSelectedCharacter();
+      this.ui.renderCharacterList(this.characters, this.selectedCharacterId);
+      if (refreshed) {
+        const selection = this.resolveSelectionForCharacter(refreshed, this.selectedLevelId);
+        this.ui.renderCharacterDetails(refreshed, {
+          resetTab: false,
+          selectedLevelId: selection.level.id,
+          selectedDifficulty: selection.difficulty
+        });
+        const equippedCount = Array.isArray(refreshed.equippedClassSkillIds)
+          ? refreshed.equippedClassSkillIds.length
+          : 0;
+        this.ui.setHomeStatus(
+          `${refreshed.name} will start runs with ${equippedCount} class skill${equippedCount === 1 ? "" : "s"} equipped.`
+        );
+        return { ok: true, character: refreshed };
+      }
+
+      return { ok: true };
     }
 
     handleMoveInventoryItem(fromLocation, toLocation) {
@@ -3363,6 +3642,7 @@
       if (definition.itemType === "helmet") return ["helmet"];
       if (definition.itemType === "chest") return ["chest"];
       if (definition.itemType === "leggings") return ["leggings"];
+      if (definition.itemType === "gloves") return ["gloves"];
       if (definition.itemType === "boots") return ["boots"];
       if (definition.itemType === "ring") return ["ring1", "ring2"];
       if (definition.itemType === "amulet") return ["amulet"];
@@ -3650,6 +3930,7 @@
       const runState = {
         characterId: character.id,
         characterName: character.name,
+        characterLegacyLevel: Math.max(1, Math.floor(Number(character.legacyLevel || 1))),
         level,
         difficulty,
         bestiaryDiscoveries: this.getCharacterBestiaryDiscoverySet(character),
@@ -4854,7 +5135,7 @@
       }
       run.progression.currentUpgradeChoices = this.ensureThreeUpgradeChoices(choices, canOfferPostCapRewards);
       run.pauseReason = "levelup";
-      this.ui.showLevelUp(run.progression.currentUpgradeChoices);
+      this.ui.showLevelUp(run.progression.currentUpgradeChoices, run.progression.level);
     }
 
     getUpgradeRankForRun(run, upgradeId) {
@@ -5035,14 +5316,16 @@
         }
         const rank = this.getUpgradeRankForRun(run, upgrade.id);
         const nextRank = rank + 1;
+        let title = upgrade.title;
         let description = upgrade.description;
         if (upgrade.type === "ultimate") {
           description = `${upgrade.description} (Ultimate)`;
-        } else {
-          description = `${upgrade.description} (Rank ${nextRank}/${upgrade.maxRank})`;
+        } else if (Number(upgrade.maxRank || 0) > 1) {
+          title = `${upgrade.title} (${nextRank}/${upgrade.maxRank})`;
         }
         return {
           ...upgrade,
+          title,
           rank,
           nextRank,
           description
@@ -5490,7 +5773,8 @@
             ? chestRadius
             : 6,
         type,
-        value: Math.max(1, Math.floor(value || 1))
+        value: Math.max(1, Math.floor(value || 1)),
+        spriteRotation: type === "xp" ? Math.random() * 0.6 - 0.3 : 0
       };
       if (type === "item") {
         pickup.item = opts.item || null;
@@ -5523,19 +5807,28 @@
         run.stats.legacyXpEarned += 120;
       }
 
+      const completedLevelNumber = run.level ? Math.max(1, Math.floor(Number(run.level.index || 1))) : 1;
+      const completedDifficulty = this.normalizeDifficulty(run.difficulty);
+      const legacyXpEligibility = this.getRunLegacyXpEligibility(
+        run.characterLegacyLevel,
+        completedLevelNumber,
+        completedDifficulty
+      );
+      const awardedLegacyXp = legacyXpEligibility.eligible ? run.stats.legacyXpEarned : 0;
+
       const summary = {
         characterName: run.characterName,
         levelLabel: run.level && run.level.label ? run.level.label : "Level 1",
         completedLevelId: run.level && run.level.id ? run.level.id : "level_1",
-        completedLevelNumber: run.level ? Math.max(1, Math.floor(Number(run.level.index || 1))) : 1,
-        completedDifficulty: this.normalizeDifficulty(run.difficulty),
+        completedLevelNumber,
+        completedDifficulty,
         victory: reason === "victory",
         timeSurvived: Math.floor(run.time),
         enemiesKilled: run.stats.enemiesKilled,
         enemyKillsByType: { ...(run.stats.enemyKillsByType || {}) },
         goldEarned: run.stats.goldEarned,
         newBestiaryEntries: Math.max(0, Math.floor(Number(run.stats.newBestiaryEntries || 0))),
-        legacyXpEarned: run.stats.legacyXpEarned,
+        legacyXpEarned: awardedLegacyXp,
         deaths: reason === "death" ? 1 : 0,
         minibossesDefeated: run.stats.minibossesDefeated,
         bossChestOpened: Boolean(run.stats.bossChestOpened),
@@ -5545,6 +5838,11 @@
         finalBossAppeared: run.stats.finalBossAppeared,
         finalBossDefeated: run.stats.finalBossDefeated
       };
+      if (!legacyXpEligibility.eligible) {
+        summary.legacyXpBlockedReason =
+          `No character XP awarded: Level + Difficulty must be at least ${legacyXpEligibility.requiredScore} ` +
+          `(current ${legacyXpEligibility.levelNumber} + ${legacyXpEligibility.difficulty} = ${legacyXpEligibility.runScore}).`;
+      }
 
       const masteryProgressMap =
         run.weaponMastery && run.weaponMastery.progressByInstanceId && typeof run.weaponMastery.progressByInstanceId === "object"
@@ -5893,6 +6191,8 @@
 
     drawEnemyProjectiles() {
       const ctx = this.ctx;
+      const glowColor = "rgba(255, 92, 92, 0.68)";
+      const glowBlur = 3;
       this.currentRun.entities.enemyProjectiles.forEach((projectile) => {
         const projectileSprite = this.getEnemyProjectileSprite(projectile.sourceTypeId);
         if (projectileSprite) {
@@ -5907,16 +6207,22 @@
           ctx.save();
           ctx.translate(projectile.x, projectile.y);
           ctx.rotate(angle);
+          ctx.shadowColor = glowColor;
+          ctx.shadowBlur = glowBlur;
           ctx.drawImage(projectileSprite, -renderLength * 0.5, -renderHeight * 0.5, renderLength, renderHeight);
           ctx.restore();
           ctx.imageSmoothingEnabled = previousSmoothing;
           return;
         }
 
+        ctx.save();
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = glowBlur;
         ctx.fillStyle = projectile.radius >= 7 ? "#ff4972" : "#ff9d84";
         ctx.beginPath();
         ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
       });
     }
 
@@ -6056,6 +6362,38 @@
           ctx.lineTo(pickup.x, pickup.y + r * 0.35);
           ctx.stroke();
           return;
+        }
+        if (pickup.type === "gold") {
+          const coinSprite = this.getPickupSprite("gold");
+          if (coinSprite) {
+            const renderSize = Math.max(14, pickup.radius * 2.7);
+            const previousSmoothing = ctx.imageSmoothingEnabled;
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(
+              coinSprite,
+              pickup.x - renderSize * 0.5,
+              pickup.y - renderSize * 0.5,
+              renderSize,
+              renderSize
+            );
+            ctx.imageSmoothingEnabled = previousSmoothing;
+            return;
+          }
+        }
+        if (pickup.type === "xp") {
+          const xpGemSprite = this.getPickupSprite("xp");
+          if (xpGemSprite) {
+            const renderSize = Math.max(12.6, pickup.radius * 2.61);
+            const previousSmoothing = ctx.imageSmoothingEnabled;
+            ctx.imageSmoothingEnabled = false;
+            ctx.save();
+            ctx.translate(pickup.x, pickup.y);
+            ctx.rotate(Number(pickup.spriteRotation || 0));
+            ctx.drawImage(xpGemSprite, -renderSize * 0.5, -renderSize * 0.5, renderSize, renderSize);
+            ctx.restore();
+            ctx.imageSmoothingEnabled = previousSmoothing;
+            return;
+          }
         }
         ctx.fillStyle = pickup.type === "xp" ? "#66c4ff" : "#f4c542";
         ctx.beginPath();

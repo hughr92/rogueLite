@@ -62,7 +62,32 @@
     return "";
   }
 
+  function getRarityBorderClass(rarityId) {
+    const key = normalizeRarityKey(rarityId);
+    if (key === "grey") return "rarity-border-grey";
+    if (key === "blue") return "rarity-border-blue";
+    if (key === "purple") return "rarity-border-purple";
+    if (key === "gold") return "rarity-border-gold";
+    if (key === "green") return "rarity-border-green";
+    return "";
+  }
+
   const UPGRADE_BY_ID = Object.fromEntries(window.RL_DATA.UPGRADES.map((upgrade) => [upgrade.id, upgrade]));
+  const MAX_CLASS_SKILLS_PER_RUN = Math.max(
+    1,
+    Math.floor(Number((window.RL_DATA.RUN && window.RL_DATA.RUN.maxSkillChoicesPerRun) || 4))
+  );
+  const COIN_ICON_PATH = "assets/pickups/coin.png";
+  const BESTIARY_ENEMY_ICON_PATH_BY_TYPE = Object.freeze({
+    grunt: "images/enemies/melee_basic/1_raider/base/skeleton_melee_top.png",
+    runner: "images/enemies/melee_fast/1_skitter/base/skeleton_skitter_top.png",
+    shooter: "images/enemies/ranged_archer/1_hex_archer/base/skeleton_archer_top.png",
+    trishot: "images/enemies/ranged_volley_caster/1_volley_shaman/base/placeholder.png",
+    shieldbearer: "images/enemies/melee_tank/1_bulwark/base/skeleton_bulwark_top_shield.png",
+    dasher: "images/enemies/melee_charge/1_lancer/base/skeleton_lancer_top.png",
+    miniboss: "images/enemies/elite_leader/1_war_captain/base/placeholder.png",
+    finalBoss: "images/enemies/boss_final/1_abyss_tyrant/base/placeholder.png"
+  });
   const SKILL_ICON_PATH_BY_ID = Object.freeze({
     ground_slam: "assets/skills/class/barbarian/ground_slam.png",
     twin_swing: "assets/skills/class/barbarian/twin_swing.png",
@@ -115,12 +140,111 @@
     return img;
   }
 
+  function toSnakeCaseToken(rawValue) {
+    return String(rawValue || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }
+
+  function getItemAssetSlug(templateId, rarityId) {
+    const id = String(templateId || "").trim().toLowerCase();
+    const rarity = normalizeRarityKey(rarityId) || "grey";
+    if (!id) return "";
+    if (rarity === "grey" && id.startsWith("common_")) return id.slice("common_".length);
+    if (id.startsWith(`${rarity}_`)) return id.slice(rarity.length + 1);
+    return id;
+  }
+
+  function resolveItemIconPath(item) {
+    if (!item || typeof item !== "object") return "";
+    const rarity = normalizeRarityKey(item.rarity) || "grey";
+    const slug =
+      getItemAssetSlug(item.templateId || item.id, rarity) ||
+      toSnakeCaseToken(item.name || item.templateId || item.id || "");
+    if (!slug) return "";
+    return `assets/items/${rarity}/${slug}/icon.png`;
+  }
+
+  function resolveConsumableIconPath(consumable) {
+    if (!consumable || typeof consumable !== "object") return "";
+    const explicitId = toSnakeCaseToken(consumable.consumableId || consumable.id || "");
+    if (explicitId) return `assets/items/utility/${explicitId}/icon.png`;
+    const kind = String(consumable.kind || "").trim().toLowerCase();
+    if (kind === "consumable_health_potion") return "assets/items/utility/health_potion/icon.png";
+    if (kind === "consumable_revival") return "assets/items/utility/revive_sigil/icon.png";
+    return "";
+  }
+
+  function resolveBestiaryEnemyIconPath(enemyTypeId) {
+    const id = String(enemyTypeId || "").trim();
+    if (!id) return "";
+    return BESTIARY_ENEMY_ICON_PATH_BY_TYPE[id] || "";
+  }
+
+  function createItemIcon(path, altText, className) {
+    const frame = createElement(
+      "div",
+      `item-icon-frame${className ? ` ${className}` : ""}`.trim()
+    );
+    const img = createElement("img", "item-icon-image");
+    img.alt = altText || "Item icon";
+    img.loading = "lazy";
+    img.decoding = "async";
+    if (!path) {
+      frame.classList.add("item-icon-fallback");
+      return frame;
+    }
+    img.src = path;
+    img.addEventListener("error", () => {
+      frame.classList.add("item-icon-fallback");
+    });
+    img.addEventListener("load", () => {
+      const width = Math.max(0, Number(img.naturalWidth || 0));
+      const height = Math.max(0, Number(img.naturalHeight || 0));
+      if (width <= 1 && height <= 1) {
+        frame.classList.add("item-icon-fallback");
+      } else {
+        frame.classList.remove("item-icon-fallback");
+      }
+    });
+    frame.appendChild(img);
+    return frame;
+  }
+
+  function createCoinAmount(value, className) {
+    const amount = Math.max(0, Math.floor(Number(value || 0)));
+    const wrapper = createElement(
+      "span",
+      `coin-amount${className ? ` ${className}` : ""}`.trim()
+    );
+    const icon = createElement("img", "coin-icon");
+    icon.src = COIN_ICON_PATH;
+    icon.alt = "Gold";
+    icon.loading = "lazy";
+    icon.decoding = "async";
+    icon.addEventListener("error", () => {
+      icon.classList.add("hidden");
+    });
+    wrapper.append(icon, createElement("span", "coin-value", String(amount)));
+    return wrapper;
+  }
+
+  function createMerchantPriceLine(label, price) {
+    const row = createElement("div", "merchant-price merchant-price-line");
+    row.appendChild(createElement("span", "merchant-price-label", `${label}:`));
+    row.appendChild(createCoinAmount(price));
+    return row;
+  }
+
   function createUiController() {
     const dom = {
       homeScreen: byId("homeScreen"),
       gameScreen: byId("gameScreen"),
       createCharacterBtn: byId("createCharacterBtn"),
       startRunBtn: byId("startRunBtn"),
+      startRunXpWarning: byId("startRunXpWarning"),
       levelSelector: byId("levelSelector"),
       difficultySelector: byId("difficultySelector"),
       homeStatus: byId("homeStatus"),
@@ -147,6 +271,7 @@
       saveCharacterBtn: byId("saveCharacterBtn"),
       cancelCharacterBtn: byId("cancelCharacterBtn"),
       levelUpOverlay: byId("levelUpOverlay"),
+      levelUpTitle: byId("levelUpTitle"),
       levelUpOptions: byId("levelUpOptions"),
       pauseOverlay: byId("pauseOverlay"),
       resumeBtn: byId("resumeBtn"),
@@ -191,6 +316,7 @@
       onBuybackMerchantItem: null,
       onClaimQuestReward: null,
       onClaimBountyReward: null,
+      onSetEquippedClassSkills: null,
       onResume: null,
       onRestart: null,
       onReturnHome: null,
@@ -234,8 +360,10 @@
 
       const menu = createElement("div", "inventory-context-menu");
       const sellPrice = Math.max(1, Math.floor(Number(safeOptions.sellPrice || 0)));
-      const sellButton = createElement("button", "inventory-context-menu-item", `Sell for ${sellPrice}g`);
+      const sellButton = createElement("button", "inventory-context-menu-item");
       sellButton.type = "button";
+      sellButton.appendChild(createElement("span", "inventory-context-menu-label", "Sell for"));
+      sellButton.appendChild(createCoinAmount(sellPrice, "inventory-context-coin"));
       sellButton.addEventListener("click", (clickEvent) => {
         clickEvent.preventDefault();
         clickEvent.stopPropagation();
@@ -523,6 +651,46 @@
       return Math.max(config.defaultDifficulty, Math.min(config.maxDifficulty, Math.floor(explicit)));
     }
 
+    function getLevelIndexFromId(levelId) {
+      const normalized = String(levelId || "").trim();
+      if (!normalized) return 1;
+      const level = getLevelDefinitions().find((entry) => entry && entry.id === normalized);
+      if (level && Number(level.index) > 0) {
+        return Math.max(1, Math.floor(Number(level.index)));
+      }
+      const match = normalized.match(/\d+/);
+      if (!match) return 1;
+      return Math.max(1, Math.floor(Number(match[0])));
+    }
+
+    function getLegacyXpEligibilityForSelection(character, levelId, difficulty) {
+      const playerLevel = Math.max(1, Math.floor(Number((character && character.legacyLevel) || 1)));
+      const levelNumber = getLevelIndexFromId(levelId);
+      const normalizedDifficulty = normalizeDifficulty(difficulty);
+      const requiredScore = Math.max(0, playerLevel - 3);
+      const runScore = levelNumber + normalizedDifficulty;
+      return {
+        eligible: runScore >= requiredScore,
+        playerLevel,
+        requiredScore,
+        runScore,
+        levelNumber,
+        difficulty: normalizedDifficulty
+      };
+    }
+
+    function setStartRunXpWarning(text) {
+      if (!dom.startRunXpWarning) return;
+      const message = String(text || "").trim();
+      if (!message) {
+        dom.startRunXpWarning.textContent = "";
+        dom.startRunXpWarning.classList.add("hidden");
+        return;
+      }
+      dom.startRunXpWarning.textContent = message;
+      dom.startRunXpWarning.classList.remove("hidden");
+    }
+
     function renderLevelSelector(character, options) {
       if (!dom.levelSelector) return;
       dom.levelSelector.innerHTML = "";
@@ -566,6 +734,7 @@
       if (!dom.difficultySelector) return;
       dom.difficultySelector.innerHTML = "";
       if (!character) {
+        setStartRunXpWarning("");
         dom.difficultySelector.appendChild(
           createElement("div", "level-selector-empty", "Select a level to choose difficulty.")
         );
@@ -574,6 +743,7 @@
 
       const config = getDifficultyConfig();
       const selectedLevelId = String(state.selectedLevelId || "").trim() || "level_1";
+      const selectedLevel = getLevelDefinitions().find((level) => level && level.id === selectedLevelId) || null;
       const unlockedDifficulty = getCharacterUnlockedDifficultyByLevel(character, selectedLevelId);
       const selectedFromOptions = options ? Number(options.selectedDifficulty) : Number.NaN;
       if (!Number.isNaN(selectedFromOptions)) {
@@ -581,25 +751,59 @@
       }
       state.selectedDifficulty = Math.max(config.defaultDifficulty, Math.min(unlockedDifficulty, normalizeDifficulty(state.selectedDifficulty)));
 
+      const circleRow = createElement("div", "difficulty-circle-row");
+      circleRow.setAttribute("role", "radiogroup");
+      circleRow.setAttribute("aria-label", "Difficulty");
       for (let difficulty = config.defaultDifficulty; difficulty <= config.maxDifficulty; difficulty += 1) {
-        const button = createElement("button", "btn level-selector-btn", `D${difficulty}`);
-        button.type = "button";
         const isUnlocked = difficulty <= unlockedDifficulty;
-        if (!isUnlocked) {
-          button.disabled = true;
-          button.classList.add("locked");
-          button.title = `Beat ${selectedLevelId.replace(/_/g, " ")} on D${difficulty - 1} to unlock D${difficulty}.`;
+        const isFilled = difficulty <= state.selectedDifficulty;
+        const isSelected = difficulty === state.selectedDifficulty;
+        const button = createElement("button", "difficulty-circle-btn");
+        button.type = "button";
+        button.setAttribute("role", "radio");
+        button.setAttribute("aria-checked", isSelected ? "true" : "false");
+        button.setAttribute("aria-label", isUnlocked ? `Difficulty ${difficulty}` : `Difficulty ${difficulty} locked`);
+        button.title = isUnlocked ? `D${difficulty}` : `D${difficulty} (Locked)`;
+        if (isFilled) {
+          button.classList.add("filled");
         }
-        if (difficulty === state.selectedDifficulty) {
+        if (isSelected) {
           button.classList.add("active");
+        }
+        if (!isUnlocked) {
+          button.classList.add("locked");
+          button.disabled = true;
         }
         button.addEventListener("click", () => {
           if (!isUnlocked) return;
+          if (difficulty === state.selectedDifficulty) return;
           state.selectedDifficulty = difficulty;
           renderDifficultySelector(character, null);
           if (handlers.onSelectDifficulty) handlers.onSelectDifficulty(difficulty);
         });
-        dom.difficultySelector.appendChild(button);
+        circleRow.appendChild(button);
+      }
+      dom.difficultySelector.appendChild(circleRow);
+
+      if (unlockedDifficulty < config.maxDifficulty) {
+        const nextLocked = unlockedDifficulty + 1;
+        dom.difficultySelector.appendChild(
+          createElement(
+            "div",
+            "difficulty-select-hint",
+            `Beat ${(selectedLevel && selectedLevel.label) || selectedLevelId.replace(/_/g, " ")} on D${unlockedDifficulty} to unlock D${nextLocked}.`
+          )
+        );
+      }
+
+      const xpEligibility = getLegacyXpEligibilityForSelection(character, selectedLevelId, state.selectedDifficulty);
+      if (!xpEligibility.eligible) {
+        setStartRunXpWarning(
+          `No character XP: need Level + Difficulty >= ${xpEligibility.requiredScore} ` +
+            `(current ${xpEligibility.levelNumber} + ${xpEligibility.difficulty} = ${xpEligibility.runScore}).`
+        );
+      } else {
+        setStartRunXpWarning("");
       }
     }
 
@@ -962,12 +1166,17 @@
               path.label || path.upgradeId,
               "skill-inline-icon"
             );
-            const label = createElement("strong", "", `${path.label}: `);
-            const desc = createElement("span", "", path.description);
+            const copy = createElement("div", "upgrade-node-copy");
+            const label = createElement("div", "upgrade-node-title", path.label);
+            const desc = createElement("div", "upgrade-node-desc", path.description);
             const level = createElement("span", "upgrade-level", `${rank}/${path.maxLevel}`);
-            if (icon) node.appendChild(icon);
-            node.append(label, desc);
-            node.appendChild(level);
+            copy.append(label, desc, level);
+            if (icon) {
+              node.appendChild(icon);
+            } else {
+              node.classList.add("upgrade-node-no-icon");
+            }
+            node.appendChild(copy);
             upgrades.appendChild(node);
           });
 
@@ -980,8 +1189,9 @@
               weapon.ultimate.label || weapon.ultimate.upgradeId,
               "skill-inline-icon"
             );
-            const label = createElement("strong", "", `${weapon.ultimate.label}: `);
-            const desc = createElement("span", "", weapon.ultimate.description);
+            const copy = createElement("div", "upgrade-node-copy");
+            const label = createElement("div", "upgrade-node-title", weapon.ultimate.label);
+            const desc = createElement("div", "upgrade-node-desc", weapon.ultimate.description);
             const status = createElement("span", "ultimate-status");
 
             if (ultimateRank > 0) {
@@ -992,16 +1202,19 @@
               status.textContent = "Available";
             } else {
               ultimateNode.classList.add("ultimate-locked");
-              status.textContent = "Locked";
+              status.textContent = "";
             }
 
-            if (icon) ultimateNode.appendChild(icon);
-            ultimateNode.append(label, desc, status);
-            if (!unlocked && ultimateRank <= 0 && weapon.ultimate.requirementText) {
-              ultimateNode.appendChild(
-                createElement("div", "ultimate-requirement", weapon.ultimate.requirementText)
-              );
+            copy.append(label, desc);
+            if (status.textContent) {
+              copy.appendChild(status);
             }
+            if (icon) {
+              ultimateNode.appendChild(icon);
+            } else {
+              ultimateNode.classList.add("upgrade-node-no-icon");
+            }
+            ultimateNode.appendChild(copy);
             upgrades.appendChild(ultimateNode);
           }
 
@@ -1174,6 +1387,10 @@
       const config = getClassSkillConfiguration(character);
       if (!config) return [];
       const classId = character && (character.classId || character.class);
+      const equippedIds = Array.isArray(character && character.equippedClassSkillIds)
+        ? character.equippedClassSkillIds.map((id) => String(id || "").trim()).filter((id) => id.length > 0)
+        : [];
+      const equippedSet = new Set(equippedIds);
       return config.skills
         .filter((skill) => {
           if (!skill || typeof skill !== "object") return false;
@@ -1182,11 +1399,12 @@
           return classIds.includes(classId);
         })
         .map((skill) => {
-          const unlockRunLevel = Math.max(1, Math.floor(Number(skill.unlockLegacyLevel || 1)));
+          const unlockRunLevel = 1;
           return {
             ...skill,
             unlockRunLevel,
-            availableFromStart: unlockRunLevel <= 1
+            availableFromStart: true,
+            isEquipped: equippedSet.has(String(skill.id || "").trim())
           };
         })
         .sort((a, b) => a.unlockRunLevel - b.unlockRunLevel);
@@ -1207,14 +1425,15 @@
       const subtitle = createElement(
         "div",
         "skill-subtitle",
-        config.subtitle || "Class-specific skills are chosen during run level-ups."
+        config.subtitle || "Choose which class skills are active when a run begins."
       );
       const panel = createElement("div", "class-skills-panel");
+      const equippedCount = skills.reduce((count, skill) => (skill.isEquipped ? count + 1 : count), 0);
       panel.appendChild(
         createElement(
           "div",
           "class-skills-progress",
-          "Skills are not active by default. Buy them from level-up choices during a run."
+          `Equipped for run: ${equippedCount}/${MAX_CLASS_SKILLS_PER_RUN}`
         )
       );
 
@@ -1233,33 +1452,62 @@
           skill.name || skill.id,
           "class-skill-icon"
         );
+        const layout = createElement("div", "class-skill-layout");
+        const content = createElement("div", "class-skill-content");
         if (icon) {
-          card.appendChild(icon);
+          layout.appendChild(icon);
+        } else {
+          layout.classList.add("class-skill-layout-no-icon");
         }
         header.appendChild(createElement("div", "class-skill-name", skill.name || toTitle(skill.id)));
-        header.appendChild(
-          createElement(
-            "div",
-            "class-skill-state",
-            skill.availableFromStart
-              ? "Available from Run Start (via level-up choice)"
-              : `Appears at Run Level ${skill.unlockRunLevel}`
-          )
-        );
-        card.appendChild(header);
+        content.appendChild(header);
+
+        const equipLabel = createElement("label", "class-skill-equip-toggle class-skill-equip-corner");
+        equipLabel.appendChild(createElement("span", "class-skill-equip-label", "Equipped for run start"));
+        const equipInput = createElement("input", "class-skill-equip-input");
+        equipInput.type = "checkbox";
+        equipInput.checked = Boolean(skill.isEquipped);
+        equipInput.setAttribute("aria-label", `Equip ${skill.name || toTitle(skill.id)} for run`);
+        equipLabel.title = "Equip for run";
+        const canEquipMore = equippedCount < MAX_CLASS_SKILLS_PER_RUN;
+        if (!skill.isEquipped && !canEquipMore) {
+          equipInput.disabled = true;
+        }
+        equipInput.addEventListener("change", () => {
+          if (!handlers.onSetEquippedClassSkills) return;
+          const nextSet = new Set(
+            skills.filter((entry) => entry && entry.isEquipped).map((entry) => String(entry.id || "").trim())
+          );
+          const normalizedSkillId = String(skill.id || "").trim();
+          if (equipInput.checked) {
+            nextSet.add(normalizedSkillId);
+          } else {
+            nextSet.delete(normalizedSkillId);
+          }
+          const orderedIds = skills
+            .map((entry) => String((entry && entry.id) || "").trim())
+            .filter((id) => id && nextSet.has(id))
+            .slice(0, MAX_CLASS_SKILLS_PER_RUN);
+          const result = handlers.onSetEquippedClassSkills(orderedIds);
+          if (result && result.ok === false) {
+            equipInput.checked = Boolean(skill.isEquipped);
+          }
+        });
+        equipLabel.appendChild(equipInput);
+        card.appendChild(equipLabel);
 
         const metaParts = [];
         if (skill.type) metaParts.push(toTitle(String(skill.type).replace(/_/g, " ")));
         if (skill.category) metaParts.push(skill.category);
         if (skill.currentLevel) metaParts.push(`Rank ${Math.max(1, Math.floor(Number(skill.currentLevel || 1)))}`);
-        card.appendChild(createElement("div", "class-skill-meta", metaParts.join(" | ")));
+        content.appendChild(createElement("div", "class-skill-meta", metaParts.join(" | ")));
 
         if (skill.description) {
-          card.appendChild(createElement("div", "class-skill-desc", skill.description));
+          content.appendChild(createElement("div", "class-skill-desc", skill.description));
         }
 
         if (skill.keybind) {
-          card.appendChild(createElement("div", "class-skill-keybind", `Keybind: ${skill.keybind}`));
+          content.appendChild(createElement("div", "class-skill-keybind", `Keybind: ${skill.keybind}`));
         }
 
         const baseValues = skill.baseValues && typeof skill.baseValues === "object" ? skill.baseValues : null;
@@ -1274,9 +1522,12 @@
             })
             .join(" | ");
           if (baseText) {
-            card.appendChild(createElement("div", "class-skill-base", `Base: ${baseText}`));
+            content.appendChild(createElement("div", "class-skill-base", `Base: ${baseText}`));
           }
         }
+
+        layout.appendChild(content);
+        card.appendChild(layout);
 
         list.appendChild(card);
       });
@@ -1453,7 +1704,8 @@
         );
         const perTierBonus = Number.isNaN(perTierBonusRaw) ? 1 : Math.max(0, Math.floor(perTierBonusRaw));
         const totalBonus = tiersUnlocked * perTierBonus;
-        return `Mastery T${tiersUnlocked}/${tierCap} | ${killsTotal}/${nextThreshold} kills | +${totalBonus} dmg`;
+        const displayedKills = Math.min(killsTotal, nextThreshold);
+        return `Mastery T${tiersUnlocked}/${tierCap} | ${displayedKills}/${nextThreshold} kills | +${totalBonus} dmg`;
       };
 
       const normalizeStatKey = (statKey) => {
@@ -1472,6 +1724,7 @@
         if (key === "baseWeaponDamage") return `+${amount} Base Weapon Damage`;
         if (key === "armor") return `+${amount} Armor`;
         if (key === "maxHpBonus") return `+${amount} Max HP`;
+        if (key === "attackSpeedBonusPct") return `${amount >= 0 ? "+" : ""}${amount}% Attack Speed`;
         if (key === "moveSpeedBonusPct") return `${amount >= 0 ? "+" : ""}${amount}% Move Speed`;
         if (key === "statusEffectResistPct") return `${amount >= 0 ? "+" : ""}${amount}% Status Resist`;
         const label = key.replace(/([A-Z])/g, " $1").replace(/_/g, " ");
@@ -1489,14 +1742,31 @@
 
       const getItemDisplay = (itemValue) => {
         if (!itemValue) {
-          return { name: "Empty", meta: "", stats: "", mastery: "", rarityTextClass: "" };
+          return {
+            name: "Empty",
+            meta: "",
+            stats: "",
+            mastery: "",
+            rarityTextClass: "",
+            rarityBorderClass: "",
+            iconPath: ""
+          };
         }
         if (typeof itemValue === "string") {
-          return { name: itemValue, meta: "", stats: "", mastery: "", rarityTextClass: "" };
+          return {
+            name: itemValue,
+            meta: "",
+            stats: "",
+            mastery: "",
+            rarityTextClass: "",
+            rarityBorderClass: "",
+            iconPath: ""
+          };
         }
         const name = itemValue.name || itemValue.templateId || "Item";
         const rarity = rarityLabel(itemValue.rarity);
         const rarityTextClass = getRarityTextClass(itemValue.rarity);
+        const rarityBorderClass = getRarityBorderClass(itemValue.rarity);
         const type = itemTypeLabel(itemValue.itemType);
         const weaponWeight = Number(itemValue.weaponSlotWeight);
         const hasWeaponWeight =
@@ -1508,7 +1778,16 @@
         const metaParts = [rarity, type, weightLabel].filter(Boolean);
         const statText = getStatText(itemValue.stats);
         const masteryText = getMasteryText(itemValue);
-        return { name, meta: metaParts.join(" | "), stats: statText, mastery: masteryText, rarityTextClass };
+        const iconPath = resolveItemIconPath(itemValue);
+        return {
+          name,
+          meta: metaParts.join(" | "),
+          stats: statText,
+          mastery: masteryText,
+          rarityTextClass,
+          rarityBorderClass,
+          iconPath
+        };
       };
 
       const normalizeEquipmentSlotKey = (slotKey) => {
@@ -1534,6 +1813,7 @@
         if (item.itemType === "helmet") return ["helmet"];
         if (item.itemType === "chest") return ["chest"];
         if (item.itemType === "leggings") return ["leggings"];
+        if (item.itemType === "gloves") return ["gloves"];
         if (item.itemType === "boots") return ["boots"];
         if (item.itemType === "ring") return ["ring1", "ring2"];
         if (item.itemType === "amulet") return ["amulet"];
@@ -1653,6 +1933,7 @@
         { key: "helmet", label: "Helmet", className: "slot-head" },
         { key: "chest", label: "Chest", className: "slot-chest" },
         { key: "leggings", label: "Leggings", className: "slot-leggings" },
+        { key: "gloves", label: "Gloves", className: "slot-gloves" },
         { key: "boots", label: "Boots", className: "slot-boots" },
         { key: "primaryMeleeWeapon", label: "Primary Melee", className: "slot-primary-melee" },
         { key: "secondaryMeleeWeapon", label: "Secondary Melee", className: "slot-secondary-melee" },
@@ -1671,6 +1952,9 @@
         slotBox.appendChild(createElement("div", "equipment-slot-label", slot.label));
         if (value) {
           const itemChip = createElement("div", "inventory-item-chip");
+          if (display.rarityBorderClass) {
+            itemChip.classList.add(display.rarityBorderClass);
+          }
           itemChip.draggable = true;
           itemChip.addEventListener("dragstart", (event) => startDrag(event, location));
           itemChip.addEventListener("dragend", () => clearDragState());
@@ -1685,20 +1969,22 @@
               });
             });
           }
+          const itemLayout = createElement("div", "inventory-item-layout");
+          const itemIcon = createItemIcon(display.iconPath, `${display.name} icon`, "inventory-item-icon");
+          const itemContent = createElement("div", "inventory-item-content");
           const itemNameEl = createElement("div", "equipment-slot-value", display.name);
           if (display.rarityTextClass) {
             itemNameEl.classList.add(display.rarityTextClass);
           }
-          itemChip.appendChild(itemNameEl);
-          if (display.meta) {
-            itemChip.appendChild(createElement("div", "equipment-slot-meta", display.meta));
-          }
+          itemContent.appendChild(itemNameEl);
           if (display.stats) {
-            itemChip.appendChild(createElement("div", "equipment-slot-stat", display.stats));
+            itemContent.appendChild(createElement("div", "equipment-slot-stat", display.stats));
           }
           if (display.mastery) {
-            itemChip.appendChild(createElement("div", "equipment-slot-stat", display.mastery));
+            itemContent.appendChild(createElement("div", "equipment-slot-stat", display.mastery));
           }
+          itemLayout.append(itemIcon, itemContent);
+          itemChip.appendChild(itemLayout);
           slotBox.appendChild(itemChip);
         } else {
           slotBox.appendChild(createElement("div", "equipment-slot-value", display.name));
@@ -1724,6 +2010,7 @@
         "bludgeoningDamageBonus",
         "armor",
         "maxHpBonus",
+        "attackSpeedBonusPct",
         "moveSpeedBonusPct",
         "statusEffectResistPct"
       ];
@@ -1793,6 +2080,9 @@
           slot.classList.add("storage-slot-filled");
           const display = getItemDisplay(value);
           const itemChip = createElement("div", "inventory-item-chip");
+          if (display.rarityBorderClass) {
+            itemChip.classList.add(display.rarityBorderClass);
+          }
           itemChip.draggable = true;
           itemChip.addEventListener("dragstart", (event) => startDrag(event, location));
           itemChip.addEventListener("dragend", () => clearDragState());
@@ -1807,20 +2097,22 @@
               });
             });
           }
+          const itemLayout = createElement("div", "inventory-item-layout");
+          const itemIcon = createItemIcon(display.iconPath, `${display.name} icon`, "inventory-item-icon");
+          const itemContent = createElement("div", "inventory-item-content");
           const itemNameEl = createElement("div", "storage-slot-value", display.name);
           if (display.rarityTextClass) {
             itemNameEl.classList.add(display.rarityTextClass);
           }
-          itemChip.appendChild(itemNameEl);
-          if (display.meta) {
-            itemChip.appendChild(createElement("div", "storage-slot-meta", display.meta));
-          }
+          itemContent.appendChild(itemNameEl);
           if (display.stats) {
-            itemChip.appendChild(createElement("div", "storage-slot-stat", display.stats));
+            itemContent.appendChild(createElement("div", "storage-slot-stat", display.stats));
           }
           if (display.mastery) {
-            itemChip.appendChild(createElement("div", "storage-slot-stat", display.mastery));
+            itemContent.appendChild(createElement("div", "storage-slot-stat", display.mastery));
           }
+          itemLayout.append(itemIcon, itemContent);
+          itemChip.appendChild(itemLayout);
           slot.appendChild(itemChip);
         }
         storageGrid.appendChild(slot);
@@ -1872,6 +2164,7 @@
             if (key === "baseWeaponDamage") return `+${amount} Base Weapon Damage`;
             if (key === "armor") return `+${amount} Armor`;
             if (key === "maxHpBonus") return `+${amount} Max HP`;
+            if (key === "attackSpeedBonusPct") return `${amount >= 0 ? "+" : ""}${amount}% Attack Speed`;
             if (key === "moveSpeedBonusPct") return `${amount >= 0 ? "+" : ""}${amount}% Move Speed`;
             if (key === "statusEffectResistPct") return `${amount >= 0 ? "+" : ""}${amount}% Status Resist`;
             const label = key.replace(/([A-Z])/g, " $1").replace(/_/g, " ");
@@ -1930,7 +2223,8 @@
         );
         const perTierBonus = Number.isNaN(perTierBonusRaw) ? 1 : Math.max(0, Math.floor(perTierBonusRaw));
         const totalBonus = tiersUnlocked * perTierBonus;
-        return `Mastery T${tiersUnlocked}/${tierCap} | ${killsTotal}/${nextThreshold} kills | +${totalBonus} dmg`;
+        const displayedKills = Math.min(killsTotal, nextThreshold);
+        return `Mastery T${tiersUnlocked}/${tierCap} | ${displayedKills}/${nextThreshold} kills | +${totalBonus} dmg`;
       };
 
       const slotLabelMap = {
@@ -1938,6 +2232,7 @@
         chest: "Chest",
         leggings: "Leggings",
         boots: "Boots",
+        gloves: "Gloves",
         primaryMeleeWeapon: "Primary Melee",
         secondaryMeleeWeapon: "Secondary Melee",
         rangedWeapon: "Ranged",
@@ -1957,7 +2252,10 @@
       const reviveConsumableCharges = Math.max(0, Math.floor(Number(character.reviveConsumableCharges || 0)));
       const healthPotionCharges = Math.max(0, Math.floor(Number(character.healthPotionCharges || 0)));
       summary.appendChild(createElement("div", "merchant-summary-item", `Level: ${merchantLevel} / ${merchantLevelCap}`));
-      summary.appendChild(createElement("div", "merchant-summary-item", `Gold: ${character.gold || 0}`));
+      const goldSummary = createElement("div", "merchant-summary-item merchant-summary-currency");
+      goldSummary.appendChild(createElement("span", "merchant-summary-currency-label", "Gold:"));
+      goldSummary.appendChild(createCoinAmount(character.gold || 0));
+      summary.appendChild(goldSummary);
       summary.appendChild(createElement("div", "merchant-summary-item", `Storage Free: ${freeStorageSlots}`));
       summary.appendChild(
         createElement("div", "merchant-summary-item", `Revive Sigil: ${reviveConsumableCharges > 0 ? "Ready" : "None"}`)
@@ -2011,7 +2309,7 @@
           label: "Armor",
           filterFn: (listing) => {
             const itemType = listing && listing.item && listing.item.itemType;
-            return ["helmet", "chest", "leggings", "boots", "ring", "amulet"].includes(itemType);
+            return ["helmet", "chest", "leggings", "gloves", "boots", "ring", "amulet"].includes(itemType);
           }
         },
         {
@@ -2066,31 +2364,36 @@
                 : "";
 
             const card = createElement("article", "merchant-card");
-            if (item.rarity) {
-              card.classList.add(`merchant-rarity-${String(item.rarity).toLowerCase()}`);
+            const rarityBorderClass = getRarityBorderClass(item.rarity);
+            if (rarityBorderClass) {
+              card.classList.add(rarityBorderClass);
             }
+            const cardLayout = createElement("div", "merchant-card-layout");
+            const cardContent = createElement("div", "merchant-card-content");
+            const iconPath = resolveItemIconPath(item);
+            const itemIcon = createItemIcon(iconPath, `${item.name || "Item"} icon`, "merchant-item-icon");
             const itemName = createElement("div", "merchant-item-name", item.name || "Item");
             const rarityTextClass = getRarityTextClass(item.rarity);
             if (rarityTextClass) {
               itemName.classList.add(rarityTextClass);
             }
-            card.appendChild(itemName);
-            card.appendChild(
+            cardContent.appendChild(itemName);
+            cardContent.appendChild(
               createElement(
                 "div",
                 "merchant-item-meta",
                 [rarity ? rarity.label : "", type ? type.label : "", weightLabel].filter(Boolean).join(" | ")
               )
             );
-            card.appendChild(createElement("div", "merchant-item-line", `Slot: ${slotLabel}`));
+            cardContent.appendChild(createElement("div", "merchant-item-line", `Slot: ${slotLabel}`));
             if (physical && physical.label) {
-              card.appendChild(createElement("div", "merchant-item-line", `Damage Type: ${physical.label}`));
+              cardContent.appendChild(createElement("div", "merchant-item-line", `Damage Type: ${physical.label}`));
             }
-            card.appendChild(createElement("div", "merchant-item-line", `Stats: ${stats}`));
+            cardContent.appendChild(createElement("div", "merchant-item-line", `Stats: ${stats}`));
             if (masteryText) {
-              card.appendChild(createElement("div", "merchant-item-line", masteryText));
+              cardContent.appendChild(createElement("div", "merchant-item-line", masteryText));
             }
-            card.appendChild(createElement("div", "merchant-price", `Buyback: ${listing.price || 0}g`));
+            cardContent.appendChild(createMerchantPriceLine("Buyback", listing.price || 0));
 
             const buybackButton = createElement("button", "btn merchant-buy-btn", "Buy Back");
             buybackButton.type = "button";
@@ -2100,7 +2403,7 @@
               if (!handlers.onBuybackMerchantItem) return;
               handlers.onBuybackMerchantItem(listing.buybackId);
             });
-            card.appendChild(buybackButton);
+            cardContent.appendChild(buybackButton);
 
             const reason = !hasGold
               ? "Not enough gold"
@@ -2108,9 +2411,11 @@
               ? "Storage is full"
               : "";
             if (reason) {
-              card.appendChild(createElement("div", "merchant-buy-reason", reason));
+              cardContent.appendChild(createElement("div", "merchant-buy-reason", reason));
             }
 
+            cardLayout.append(itemIcon, cardContent);
+            card.appendChild(cardLayout);
             buybackGrid.appendChild(card);
           });
         }
@@ -2139,21 +2444,26 @@
           if (listingKind.startsWith("consumable_")) {
             const rarityTextClass = getRarityTextClass(listing.rarity);
             const card = createElement("article", "merchant-card");
-            if (listing.rarity) {
-              card.classList.add(`merchant-rarity-${String(listing.rarity).toLowerCase()}`);
+            const rarityBorderClass = getRarityBorderClass(listing.rarity);
+            if (rarityBorderClass) {
+              card.classList.add(rarityBorderClass);
             }
+            const cardLayout = createElement("div", "merchant-card-layout");
+            const cardContent = createElement("div", "merchant-card-content");
+            const consumableIconPath = resolveConsumableIconPath(listing);
+            const itemIcon = createItemIcon(consumableIconPath, `${listing.name || "Consumable"} icon`, "merchant-item-icon");
             const itemName = createElement("div", "merchant-item-name", listing.name || "Consumable");
             if (rarityTextClass) {
               itemName.classList.add(rarityTextClass);
             }
-            card.appendChild(itemName);
+            cardContent.appendChild(itemName);
             const maxOwned = Math.max(1, Math.floor(Number(listing.maxOwned || 1)));
             const currentHeld =
               listingKind === "consumable_health_potion"
                 ? Math.max(0, Math.floor(Number(character.healthPotionCharges || 0)))
                 : Math.max(0, Math.floor(Number(character.reviveConsumableCharges || 0)));
-            card.appendChild(createElement("div", "merchant-item-meta", `Consumable | Held ${currentHeld}/${maxOwned}`));
-            card.appendChild(
+            cardContent.appendChild(createElement("div", "merchant-item-meta", `Consumable | Held ${currentHeld}/${maxOwned}`));
+            cardContent.appendChild(
               createElement(
                 "div",
                 "merchant-item-line",
@@ -2163,7 +2473,7 @@
                     : "Consumed on death to revive and continue the run.")
               )
             );
-            card.appendChild(createElement("div", "merchant-price", `Price: ${listing.price || 0}g`));
+            cardContent.appendChild(createMerchantPriceLine("Price", listing.price || 0));
 
             const alreadyOwned = currentHeld >= maxOwned;
             const hasGold = (character.gold || 0) >= (listing.price || 0);
@@ -2174,7 +2484,7 @@
               if (!handlers.onBuyMerchantItem) return;
               handlers.onBuyMerchantItem(listing.listingId);
             });
-            card.appendChild(buyButton);
+            cardContent.appendChild(buyButton);
 
             const reason = !hasGold
               ? "Not enough gold"
@@ -2182,9 +2492,11 @@
               ? "Already at max carried"
               : "";
             if (reason) {
-              card.appendChild(createElement("div", "merchant-buy-reason", reason));
+              cardContent.appendChild(createElement("div", "merchant-buy-reason", reason));
             }
 
+            cardLayout.append(itemIcon, cardContent);
+            card.appendChild(cardLayout);
             list.appendChild(card);
             return;
           }
@@ -2206,31 +2518,36 @@
               : "";
 
           const card = createElement("article", "merchant-card");
-          if (item.rarity) {
-            card.classList.add(`merchant-rarity-${String(item.rarity).toLowerCase()}`);
+          const rarityBorderClass = getRarityBorderClass(item.rarity);
+          if (rarityBorderClass) {
+            card.classList.add(rarityBorderClass);
           }
+          const cardLayout = createElement("div", "merchant-card-layout");
+          const cardContent = createElement("div", "merchant-card-content");
+          const iconPath = resolveItemIconPath(item);
+          const itemIcon = createItemIcon(iconPath, `${item.name || "Item"} icon`, "merchant-item-icon");
           const itemName = createElement("div", "merchant-item-name", item.name || "Item");
           const rarityTextClass = getRarityTextClass(item.rarity);
           if (rarityTextClass) {
             itemName.classList.add(rarityTextClass);
           }
-          card.appendChild(itemName);
-          card.appendChild(
+          cardContent.appendChild(itemName);
+          cardContent.appendChild(
             createElement(
               "div",
               "merchant-item-meta",
               [rarity ? rarity.label : "", type ? type.label : "", weightLabel].filter(Boolean).join(" | ")
             )
           );
-          card.appendChild(createElement("div", "merchant-item-line", `Slot: ${slotLabel}`));
+          cardContent.appendChild(createElement("div", "merchant-item-line", `Slot: ${slotLabel}`));
           if (physical && physical.label) {
-            card.appendChild(createElement("div", "merchant-item-line", `Damage Type: ${physical.label}`));
+            cardContent.appendChild(createElement("div", "merchant-item-line", `Damage Type: ${physical.label}`));
           }
-          card.appendChild(createElement("div", "merchant-item-line", `Stats: ${stats}`));
+          cardContent.appendChild(createElement("div", "merchant-item-line", `Stats: ${stats}`));
           if (masteryText) {
-            card.appendChild(createElement("div", "merchant-item-line", masteryText));
+            cardContent.appendChild(createElement("div", "merchant-item-line", masteryText));
           }
-          card.appendChild(createElement("div", "merchant-price", `Price: ${listing.price || 0}g`));
+          cardContent.appendChild(createMerchantPriceLine("Price", listing.price || 0));
 
           const buyButton = createElement("button", "btn btn-primary merchant-buy-btn", "Buy");
           buyButton.type = "button";
@@ -2240,7 +2557,7 @@
             if (!handlers.onBuyMerchantItem) return;
             handlers.onBuyMerchantItem(listing.listingId);
           });
-          card.appendChild(buyButton);
+          cardContent.appendChild(buyButton);
 
           const reason = !hasGold
             ? "Not enough gold"
@@ -2248,9 +2565,11 @@
             ? "Storage is full"
             : "";
           if (reason) {
-            card.appendChild(createElement("div", "merchant-buy-reason", reason));
+            cardContent.appendChild(createElement("div", "merchant-buy-reason", reason));
           }
 
+          cardLayout.append(itemIcon, cardContent);
+          card.appendChild(cardLayout);
           list.appendChild(card);
         });
       }
@@ -2607,22 +2926,32 @@
       orderedEnemyIds.forEach((enemyTypeId) => {
         const enemy = enemyDefinitions[enemyTypeId] || {};
         const card = createElement("article", "bestiary-card");
+        const cardBody = createElement("div", "bestiary-card-body");
+        const enemyLabel = enemy.label || toTitle(enemyTypeId);
+        const enemyIcon = createItemIcon(
+          resolveBestiaryEnemyIconPath(enemyTypeId),
+          `${enemyLabel} portrait`,
+          "bestiary-enemy-icon"
+        );
+        const cardContent = createElement("div", "bestiary-card-content");
         const header = createElement("div", "bestiary-card-header");
-        header.appendChild(createElement("div", "bestiary-name", enemy.label || toTitle(enemyTypeId)));
+        header.appendChild(createElement("div", "bestiary-name", enemyLabel));
         header.appendChild(createElement("div", "bestiary-behavior", toTitle(enemy.behavior || "enemy")));
-        card.appendChild(header);
+        cardContent.appendChild(header);
 
         const stats = createElement("div", "bestiary-stats");
         stats.appendChild(createElement("div", "bestiary-stat", `HP: ${Math.max(1, Math.floor(Number(enemy.hp || 1)))}`));
         stats.appendChild(createElement("div", "bestiary-stat", `Damage: ${Math.max(0, Math.floor(Number(enemy.damage || 0)))}`));
-        card.appendChild(stats);
+        cardContent.appendChild(stats);
 
-        card.appendChild(
+        cardContent.appendChild(
           createElement("div", "bestiary-line", `Resistances: ${formatTypeList(enemy.resistances)}`)
         );
-        card.appendChild(
+        cardContent.appendChild(
           createElement("div", "bestiary-line", `Weaknesses: ${formatTypeList(enemy.weaknesses)}`)
         );
+        cardBody.append(enemyIcon, cardContent);
+        card.appendChild(cardBody);
         list.appendChild(card);
       });
       panel.appendChild(list);
@@ -3082,7 +3411,11 @@
       renderClassSkillHud(hud.classSkills);
     }
 
-    function showLevelUp(options) {
+    function showLevelUp(options, level) {
+      if (dom.levelUpTitle) {
+        const safeLevel = Math.max(1, Math.floor(Number(level || 1)));
+        dom.levelUpTitle.textContent = `Level ${safeLevel}`;
+      }
       dom.levelUpOptions.innerHTML = "";
       options.forEach((option) => {
         const button = createElement("button", "upgrade-option");
@@ -3094,6 +3427,8 @@
         const head = createElement("div", "upgrade-head");
         if (icon) {
           head.appendChild(icon);
+        } else {
+          head.classList.add("upgrade-head-no-icon");
         }
         const name = createElement("div", "upgrade-name", option.title);
         const desc = createElement("div", "upgrade-desc", option.description);
@@ -3136,6 +3471,9 @@
         `Final boss appeared: ${summary.finalBossAppeared ? "Yes" : "No"}`,
         `Final boss defeated: ${summary.finalBossDefeated ? "Yes" : "No"}`
       ];
+      if (summary.legacyXpBlockedReason) {
+        rows.push(String(summary.legacyXpBlockedReason));
+      }
       if (summary.finalBossDefeated) {
         rows.push(`Boss chest opened: ${summary.bossChestOpened ? "Yes" : "No"}`);
         rows.push(`Boss chest loot found: ${Math.max(0, Number(summary.bossChestItemsFound || 0))}`);

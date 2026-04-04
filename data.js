@@ -129,7 +129,7 @@
       bountyRewardItemCount: 2,
       color: "#f5c65d",
       radius: 28,
-      hp: 620,
+      hp: 310,
       damage: 20,
       resistances: ["slashing", "piercing"],
       weaknesses: ["bludgeoning"],
@@ -150,7 +150,7 @@
       bountyRewardItemCount: 2,
       color: "#ff4972",
       radius: 42,
-      hp: 4400,
+      hp: 2200,
       damage: 28,
       resistances: ["fire", "poison"],
       weaknesses: ["lightning"],
@@ -202,6 +202,7 @@
     helmet: { id: "helmet", label: "Helmet" },
     chest: { id: "chest", label: "Chest" },
     leggings: { id: "leggings", label: "Leggings" },
+    gloves: { id: "gloves", label: "Gloves" },
     boots: { id: "boots", label: "Boots" },
     ring: { id: "ring", label: "Ring" },
     amulet: { id: "amulet", label: "Amulet" }
@@ -563,6 +564,34 @@
             optionalStats: ["Status Effect Resistance +18% to +24%", "Mobility conditionals"]
           }
         ]
+      },
+      {
+        id: "gloves",
+        label: "Gloves",
+        slotLabel: "Gloves",
+        coreStats: ["Armor", "Attack Speed"],
+        rarityTiers: [
+          {
+            rarity: "grey",
+            valueRange: "Armor +1 to +2",
+            optionalStats: ["Attack Speed +2% to +4%"]
+          },
+          {
+            rarity: "blue",
+            valueRange: "Armor +2 to +4",
+            optionalStats: ["Attack Speed +4% to +7%"]
+          },
+          {
+            rarity: "purple",
+            valueRange: "Armor +4 to +6",
+            optionalStats: ["Attack Speed +7% to +10%"]
+          },
+          {
+            rarity: "gold",
+            valueRange: "Armor +6 to +9",
+            optionalStats: ["Attack Speed +10% to +14%", "Offense conditionals"]
+          }
+        ]
       }
     ]
   };
@@ -665,6 +694,22 @@
       stats: {
         moveSpeedBonusPct: 4,
         statusEffectResistPct: 8
+      }
+    },
+    common_gloves: {
+      id: "common_gloves",
+      name: "Gloves",
+      rarity: "grey",
+      itemType: "gloves",
+      itemCategory: "armor",
+      allowedSlot: "gloves",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 1,
+      merchantLevelMax: 1,
+      stats: {
+        armor: 1,
+        attackSpeedBonusPct: 3
       }
     },
     common_ring: {
@@ -798,6 +843,22 @@
         statusEffectResistPct: 14
       }
     },
+    blue_gloves: {
+      id: "blue_gloves",
+      name: "Gloves",
+      rarity: "blue",
+      itemType: "gloves",
+      itemCategory: "armor",
+      allowedSlot: "gloves",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 1,
+      merchantLevelMax: 1,
+      stats: {
+        armor: 3,
+        attackSpeedBonusPct: 6
+      }
+    },
     blue_ring: {
       id: "blue_ring",
       name: "Ring",
@@ -927,6 +988,22 @@
       stats: {
         moveSpeedBonusPct: 10,
         statusEffectResistPct: 20
+      }
+    },
+    purple_gloves: {
+      id: "purple_gloves",
+      name: "Gloves",
+      rarity: "purple",
+      itemType: "gloves",
+      itemCategory: "armor",
+      allowedSlot: "gloves",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
+      stats: {
+        armor: 5,
+        attackSpeedBonusPct: 9
       }
     },
     purple_ring: {
@@ -1061,6 +1138,22 @@
         statusEffectResistPct: 26
       }
     },
+    gold_gloves: {
+      id: "gold_gloves",
+      name: "Gloves",
+      rarity: "gold",
+      itemType: "gloves",
+      itemCategory: "armor",
+      allowedSlot: "gloves",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 5,
+      merchantLevelMax: 30,
+      stats: {
+        armor: 7,
+        attackSpeedBonusPct: 12
+      }
+    },
     gold_ring: {
       id: "gold_ring",
       name: "Ring",
@@ -1167,6 +1260,25 @@
       stats: {
         moveSpeedBonusPct: 16,
         statusEffectResistPct: 30
+      }
+    },
+    green_berserker_gloves: {
+      id: "green_berserker_gloves",
+      name: "Berserker Gauntlets",
+      rarity: "green",
+      itemType: "gloves",
+      itemCategory: "armor",
+      setId: "berserker_set",
+      setName: "Berserker Set",
+      setPiece: "gloves",
+      allowedSlot: "gloves",
+      itemLevel: 1,
+      classIds: ["barbarian"],
+      merchantLevelMin: 999,
+      merchantLevelMax: 999,
+      stats: {
+        armor: 9,
+        attackSpeedBonusPct: 14
       }
     }
   };
@@ -1279,11 +1391,11 @@
     },
     classRules: {
       barbarian: {
-        allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "boots", "ring", "amulet"],
+        allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "gloves", "boots", "ring", "amulet"],
         varietyBuckets: {
           melee: ["melee_weapon"],
           ranged: ["ranged_weapon"],
-          armor: ["helmet", "chest", "leggings", "boots", "ring", "amulet"]
+          armor: ["helmet", "chest", "leggings", "gloves", "boots", "ring", "amulet"]
         }
       }
     },
@@ -1301,6 +1413,7 @@
         ranged_weapon: 16,
         chest: 14,
         leggings: 13,
+        gloves: 11,
         boots: 11,
         helmet: 12,
         ring: 10,
@@ -1314,7 +1427,7 @@
     enabled: true,
     levelRules: {
       1: {
-        allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "boots", "ring", "amulet"]
+        allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "gloves", "boots", "ring", "amulet"]
       }
     },
     sources: {
@@ -1328,7 +1441,7 @@
             gold: 0.1
           }
         },
-        allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "boots", "ring", "amulet"],
+        allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "gloves", "boots", "ring", "amulet"],
         maxRarityByLevel: {
           1: "gold"
         }
@@ -1343,7 +1456,7 @@
             green: 0.1
           }
         },
-        allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "boots", "ring", "amulet"],
+        allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "gloves", "boots", "ring", "amulet"],
         maxRarityByLevel: {
           1: "green"
         }

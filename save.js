@@ -10,6 +10,11 @@
   const LEVELS = Array.isArray(window.RL_DATA.LEVELS) ? window.RL_DATA.LEVELS : [];
   const WEAPON_MASTERY = window.RL_DATA.WEAPON_MASTERY || {};
   const DIFFICULTY_MODIFIER = window.RL_DATA.DIFFICULTY_MODIFIER || {};
+  const CLASS_SKILLS = window.RL_DATA.CLASS_SKILLS || {};
+  const MAX_EQUIPPED_CLASS_SKILLS = Math.max(
+    1,
+    Math.floor(Number((window.RL_DATA.RUN && window.RL_DATA.RUN.maxSkillChoicesPerRun) || 4))
+  );
 
   function nowIso() {
     return new Date().toISOString();
@@ -17,6 +22,43 @@
 
   function xpRequiredForNextLegacyLevel(level) {
     return Math.max(1, Math.floor(LEGACY.baseXp * Math.pow(level, LEGACY.growth)));
+  }
+
+  function getClassSkillIdsForClass(classId) {
+    const normalizedClassId = String(classId || "").trim();
+    if (!normalizedClassId) return [];
+    const classConfig = CLASS_SKILLS[normalizedClassId];
+    if (!classConfig || !Array.isArray(classConfig.skills)) return [];
+    return classConfig.skills
+      .filter((skill) => {
+        if (!skill || typeof skill !== "object" || !skill.id) return false;
+        const classIds = Array.isArray(skill.classIds) ? skill.classIds : [];
+        if (!classIds.length) return true;
+        return classIds.includes(normalizedClassId);
+      })
+      .map((skill) => String(skill.id || "").trim())
+      .filter((id) => id.length > 0);
+  }
+
+  function normalizeEquippedClassSkillIds(rawValue, classId) {
+    const availableIds = getClassSkillIdsForClass(classId);
+    const availableSet = new Set(availableIds);
+    const cap = Math.max(1, Math.floor(Number(MAX_EQUIPPED_CLASS_SKILLS || 4)));
+
+    if (typeof rawValue === "undefined") {
+      return availableIds.slice(0, cap);
+    }
+
+    const source = Array.isArray(rawValue) ? rawValue : [];
+    const seen = {};
+    const normalized = [];
+    source.forEach((value) => {
+      const id = String(value || "").trim();
+      if (!id || seen[id] || !availableSet.has(id)) return;
+      seen[id] = true;
+      normalized.push(id);
+    });
+    return normalized.slice(0, cap);
   }
 
   function getAllQuestDefinitions() {
@@ -271,6 +313,7 @@
     if (itemType === "helmet") return ["helmet"];
     if (itemType === "chest") return ["chest"];
     if (itemType === "leggings") return ["leggings"];
+    if (itemType === "gloves") return ["gloves"];
     if (itemType === "boots") return ["boots"];
     if (itemType === "ring") return ["ring1", "ring2"];
     if (itemType === "amulet") return ["amulet"];
@@ -876,11 +919,11 @@
     const rule = rules[classId];
     if (rule && typeof rule === "object") return rule;
     return {
-      allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "boots", "ring", "amulet"],
+      allowedItemTypes: ["melee_weapon", "ranged_weapon", "helmet", "chest", "leggings", "gloves", "boots", "ring", "amulet"],
       varietyBuckets: {
         melee: ["melee_weapon"],
         ranged: ["ranged_weapon"],
-        armor: ["helmet", "chest", "leggings", "boots", "ring", "amulet"]
+        armor: ["helmet", "chest", "leggings", "gloves", "boots", "ring", "amulet"]
       }
     };
   }
@@ -895,6 +938,7 @@
         ranged_weapon: 16,
         chest: 14,
         leggings: 13,
+        gloves: 11,
         boots: 11,
         helmet: 12,
         ring: 10,
@@ -1687,6 +1731,7 @@
         helmet: null,
         chest: null,
         leggings: null,
+        gloves: null,
         boots: null,
         primaryMeleeWeapon: null,
         secondaryMeleeWeapon: null,
@@ -1734,6 +1779,7 @@
         helmet: cloneItem(normalized.equipment.helmet),
         chest: cloneItem(normalized.equipment.chest),
         leggings: cloneItem(normalized.equipment.leggings),
+        gloves: cloneItem(normalized.equipment.gloves),
         boots: cloneItem(normalized.equipment.boots),
         primaryMeleeWeapon: cloneItem(normalized.equipment.primaryMeleeWeapon),
         secondaryMeleeWeapon: cloneItem(normalized.equipment.secondaryMeleeWeapon),
@@ -1868,6 +1914,7 @@
       { slotKey: "helmet", item: rawEquipment.helmet },
       { slotKey: "chest", item: rawEquipment.chest },
       { slotKey: "leggings", item: rawEquipment.leggings },
+      { slotKey: "gloves", item: rawEquipment.gloves },
       { slotKey: "boots", item: rawEquipment.boots },
       { slotKey: "primaryMeleeWeapon", item: rawEquipment.primaryMeleeWeapon },
       { slotKey: "secondaryMeleeWeapon", item: rawEquipment.secondaryMeleeWeapon },
@@ -2004,6 +2051,13 @@
 
   function normalizeCharacter(raw) {
     const normalizedClassId = raw.classId || raw.class || "barbarian";
+    const rawEquippedClassSkillIds =
+      typeof raw.equippedClassSkillIds !== "undefined"
+        ? raw.equippedClassSkillIds
+        : typeof raw.selectedClassSkillIds !== "undefined"
+        ? raw.selectedClassSkillIds
+        : raw.classSkillLoadout;
+    const equippedClassSkillIds = normalizeEquippedClassSkillIds(rawEquippedClassSkillIds, normalizedClassId);
     const progressionLevel = normalizeProgressionLevel(raw.progressionLevel);
     const normalizedHighestUnlockedLevel = normalizeHighestUnlockedLevel(raw.highestUnlockedLevel || raw.maxUnlockedLevel || 1);
     const highestDifficultyByLevel = normalizeHighestDifficultyByLevel(
@@ -2106,6 +2160,7 @@
       legacyXpToNextLevel: legacy.legacyXpToNextLevel,
       attributeLevels,
       classNodeRanks: {},
+      equippedClassSkillIds,
       questClaims,
       unlockedPickups: unlockedState.pickups,
       unlockedFeatures: unlockedState.features,
@@ -2295,6 +2350,18 @@
   function spendClassSkillPoint(characterId, branchId, nodeId) {
     const attributeId = branchId || nodeId;
     return spendAttributePoint(characterId, attributeId);
+  }
+
+  function setEquippedClassSkills(characterId, skillIds) {
+    const updated = updateCharacter(characterId, (current) => ({
+      equippedClassSkillIds: normalizeEquippedClassSkillIds(skillIds, current.classId)
+    }));
+
+    if (!updated) {
+      return { ok: false, error: "Character not found." };
+    }
+
+    return { ok: true, character: updated };
   }
 
   function claimQuestReward(characterId, questId) {
@@ -2511,6 +2578,12 @@
         const unlockedByVictoryDifficulty = normalizeDifficultyLevel(completedDifficulty + 1);
         nextHighestDifficultyByLevel[completedLevelId] = Math.max(currentUnlockedDifficulty, unlockedByVictoryDifficulty);
       }
+      const playerLegacyLevel = Math.max(1, Math.floor(Number(current.legacyLevel || calculateLegacyProgress(current.legacyXp || 0, 0).legacyLevel || 1)));
+      const xpRequirementScore = Math.max(0, playerLegacyLevel - 3);
+      const runDifficultyScore = Math.max(1, completedLevelNumber) + Math.max(1, completedDifficulty);
+      const legacyXpEligible = runDifficultyScore >= xpRequirementScore;
+      const rawLegacyXpEarned = Math.max(0, Math.floor(Number(summary.legacyXpEarned || 0)));
+      const legacyXpEarned = legacyXpEligible ? rawLegacyXpEarned : 0;
       const merchant = incrementMerchantRunCounter(current.merchant, {
         classId: current.classId,
         characterId: current.id,
@@ -2526,7 +2599,7 @@
         highestDifficultyByLevel: nextHighestDifficultyByLevel,
         gold: current.gold + (summary.goldEarned || 0),
         lifetimeGoldCollected: Math.max(0, Math.floor(Number(current.lifetimeGoldCollected || 0))) + Math.max(0, Math.floor(Number(summary.goldEarned || 0))),
-        legacyXp: current.legacyXp + (summary.legacyXpEarned || 0),
+        legacyXp: current.legacyXp + legacyXpEarned,
         enemyKillCounts: mergeEnemyKillCounts(current.enemyKillCounts, summary.enemyKillsByType),
         bestSurvivalTime: Math.max(current.bestSurvivalTime, summary.timeSurvived || 0),
         runsPlayed: current.runsPlayed + 1,
@@ -3273,6 +3346,7 @@
     storeItemInStorage,
     spendAttributePoint,
     spendClassSkillPoint,
+    setEquippedClassSkills,
     xpRequiredForNextLegacyLevel,
     calculateLegacyProgress,
     calculateMerchantSellPrice,
