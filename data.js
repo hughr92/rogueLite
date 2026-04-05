@@ -2456,7 +2456,7 @@
       type: "path",
       weaponId: "slingshot",
       title: "Rapid Pebbles",
-      description: "Increase sling cadence for relentless ranged pressure.",
+      description: "Increases slingshot fire rate.",
       maxRank: 5,
       weight: 0.9
     },
@@ -2465,7 +2465,7 @@
       type: "path",
       weaponId: "slingshot",
       title: "Shatterstone",
-      description: "Empower shots to crack armor and ricochet through lines.",
+      description: "Adds splash AoE to stone impacts; each rank increases the splash radius.",
       maxRank: 5,
       weight: 0.88
     },
@@ -2473,8 +2473,8 @@
       id: "slingshot_meteor_barrage",
       type: "ultimate",
       weaponId: "slingshot",
-      title: "Meteor Barrage",
-      description: "Launch a crushing barrage of stone projectiles across the field.",
+      title: "Barrage",
+      description: "Stone impacts release 6 evenly spaced short-range shards that deal hit damage with no splash AoE.",
       maxRank: 1,
       weight: 4,
       requirements: {
@@ -2612,19 +2612,19 @@
                     upgradeId: "slingshot_rapid_pebbles",
                     label: "Rapid Pebbles",
                     maxLevel: 5,
-                    description: "Speeds up stone fire for relentless ranged tempo."
+                    description: "Increases slingshot fire rate."
                   },
                   {
                     upgradeId: "slingshot_shatterstone",
                     label: "Shatterstone",
                     maxLevel: 5,
-                    description: "Empowers shots to crack armor and punch through lines."
+                    description: "Adds splash AoE to stone impacts and increases splash radius per rank."
                   }
                 ],
                 ultimate: {
                   upgradeId: "slingshot_meteor_barrage",
-                  label: "Meteor Barrage",
-                  description: "Turns the sling into a devastating storm of heavy projectiles.",
+                  label: "Barrage",
+                  description: "Stone impacts release 6 evenly spaced short-range shards with no extra AoE.",
                   requirementText: "Requires both paths at max level"
                 }
               }

@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RL Skill Prompt Manager (MVP)</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="prompter-root">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1>Skill Prompt Manager</h1>
+        <p>Template-driven Midjourney prompts + skill icon library audit.</p>
+      </div>
+      <div class="topbar-actions">
+        <a class="btn" href="../index.html">Tools</a>
+        <a class="btn" href="../map-editor/index.html">Map Editor</a>
+        <a class="btn" href="../sprite-builder/index.html">Sprite Builder</a>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section id="templateLibraryPanel" class="panel templates-panel collapsed">
+        <div id="templateLibraryHeader" class="panel-head accordion-head" role="button" tabindex="0" aria-controls="templateLibraryContent" aria-expanded="false">
+          <h2>Template Library</h2>
+          <div class="head-row">
+            <span id="templateLibraryChevron" class="accordion-chevron" aria-hidden="true">></span>
+            <label for="templateFilterCategory">Category</label>
+            <select id="templateFilterCategory" class="input"></select>
+          </div>
+        </div>
+        <div id="templateLibraryContent" class="template-library-content">
+          <div id="templateList" class="template-list"></div>
+          <div class="action-row">
+            <button id="newTemplateBtn" class="btn" type="button">New</button>
+            <button id="duplicateTemplateBtn" class="btn" type="button">Duplicate</button>
+            <button id="deleteTemplateBtn" class="btn btn-danger" type="button">Delete</button>
+          </div>
+          <hr>
+          <div class="field-grid">
+            <label for="templateNameInput">Template Name</label>
+            <input id="templateNameInput" class="input" type="text" maxlength="80">
+
+            <label for="templateCategoryInput">Category</label>
+            <input id="templateCategoryInput" class="input" type="text" maxlength="48" placeholder="Global">
+
+            <label for="templateTagsInput">Tags (comma separated)</label>
+            <input id="templateTagsInput" class="input" type="text" maxlength="240" placeholder="icon, top-down, dark fantasy">
+
+            <label for="templatePromptInput">Base Prompt</label>
+            <textarea id="templatePromptInput" class="input" rows="8" placeholder="top-down fantasy skill icon, ..."></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel builder-panel">
+        <h2>Prompt Builder</h2>
+        <div class="builder-sections">
+          <details class="builder-section builder-accordion">
+            <summary class="builder-accordion-summary">1. Global Rules</summary>
+            <div class="builder-accordion-body">
+              <p class="muted">Defines overall art direction and baseline style consistency.</p>
+              <div class="field-grid">
+                <label for="globalRulesInput">Global Art Direction Rules</label>
+                <textarea id="globalRulesInput" class="input" rows="3" placeholder="high contrast, painterly brush texture, icon readability at small size"></textarea>
+                <div class="compact-controls-row cols-2">
+                  <div class="compact-control">
+                    <label for="modifierStyleTagsInput">Style Consistency Tags</label>
+                    <input id="modifierStyleTagsInput" class="input" type="text" placeholder="centered composition, no text, readable at small size">
+                  </div>
+                  <div class="compact-control">
+                    <label for="globalExclusionsInput">Global Exclusions</label>
+                    <input id="globalExclusionsInput" class="input" type="text" placeholder="no watermark, no text overlays, no UI chrome">
+                  </div>
+                </div>
+                <div class="compact-controls-row cols-1">
+                  <div class="compact-control">
+                    <label for="globalArtistInfluenceInput">Artist Influence</label>
+                    <input id="globalArtistInfluenceInput" class="input" type="text" placeholder="Frazetta-like heroic fantasy brushwork, painterly edge control">
+                  </div>
+                </div>
+
+                <div class="compact-controls-row cols-1">
+                  <div class="compact-control">
+                    <label for="globalOutputSizeSelect">Standard Output Size</label>
+                    <select id="globalOutputSizeSelect" class="input">
+                      <option value="64x64">64x64</option>
+                      <option value="96x96">96x96</option>
+                      <option value="128x128" selected>128x128</option>
+                      <option value="160x160">160x160</option>
+                      <option value="200x200">200x200</option>
+                    </select>
+                  </div>
+                  <div class="compact-control">
+                    <label for="globalAspectRatioSelect">Standard Aspect Ratio</label>
+                    <select id="globalAspectRatioSelect" class="input">
+                      <option value="1:1" selected>1:1 (Square)</option>
+                      <option value="4:3">4:3</option>
+                      <option value="3:4">3:4</option>
+                      <option value="16:9">16:9</option>
+                      <option value="9:16">9:16</option>
+                      <option value="3:2">3:2</option>
+                      <option value="2:3">2:3</option>
+                    </select>
+                  </div>
+                  <label class="inline-row global-standardize-toggle compact-control-toggle" for="enforceGlobalOutputStandardCheckbox">
+                    <input id="enforceGlobalOutputStandardCheckbox" type="checkbox" checked>
+                    <span>Enforce size/aspect standardization</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="builder-section builder-accordion">
+            <summary class="builder-accordion-summary">2. Class Rules</summary>
+            <div class="builder-accordion-body">
+              <p class="muted">Class identity and color language applied consistently across class, weapon, and generic skills.</p>
+              <div class="field-grid">
+                <div class="compact-controls-row cols-3">
+                  <div class="compact-control">
+                    <label for="classFlavorSelect">Class Type</label>
+                    <select id="classFlavorSelect" class="input"></select>
+                  </div>
+                  <div class="compact-control">
+                    <label for="classRulesTemplateScopeSelect">Rules Scope</label>
+                    <select id="classRulesTemplateScopeSelect" class="input">
+                      <option value="class">Class</option>
+                      <option value="weapon">Weapon</option>
+                    </select>
+                  </div>
+                </div>
+                <p id="classFlavorHint" class="muted class-flavor-hint"></p>
+                <div class="compact-controls-row cols-2">
+                  <div class="compact-control">
+                    <label for="modifierColorInput">Class Color Theme Override (optional)</label>
+                    <input id="modifierColorInput" class="input" type="text" placeholder="orange and gold ember glow">
+                  </div>
+                  <div class="compact-control">
+                    <label for="classExclusionsInput">Class Exclusions</label>
+                    <input id="classExclusionsInput" class="input" type="text" placeholder="no holy symbols, no futuristic armor, no ornate filigree">
+                  </div>
+                </div>
+
+                <label>Class Palette</label>
+                <div class="class-palette-panel">
+                  <div id="classPaletteSwatches" class="class-palette-swatch-grid"></div>
+                  <div class="inline-row class-palette-add-row">
+                    <input id="classPaletteHexInput" class="input" type="text" maxlength="7" placeholder="#ff6600">
+                    <input id="classPaletteColorInput" class="input class-palette-color-input" type="color" value="#ff6600">
+                    <input id="classPaletteSwatchInfluenceInput" class="input class-palette-swatch-influence-input" type="number" min="0" max="100" step="1" value="80" title="Swatch Influence %">
+                    <button id="addClassPaletteSwatchBtn" class="btn" type="button">Add</button>
+                    <button id="undoClassPaletteBtn" class="btn" type="button">Undo</button>
+                    <button id="resetClassPaletteBtn" class="btn" type="button">Reset</button>
+                  </div>
+                  <div class="class-palette-influence-row">
+                    <label for="classPaletteInfluenceInput">Palette Influence</label>
+                    <input id="classPaletteInfluenceInput" class="input" type="range" min="0" max="100" step="1" value="60">
+                    <span id="classPaletteInfluenceValue" class="muted">60%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="builder-section builder-accordion">
+            <summary class="builder-accordion-summary">3. Subject Rules</summary>
+            <div class="builder-accordion-body">
+              <p class="muted">Describes the specific skill concept and visual action (for example: two swords crossing).</p>
+              <div class="field-grid">
+                <label for="subjectImageReferenceInput">Image Reference Link</label>
+                <input id="subjectImageReferenceInput" class="input" type="url" placeholder="https://example.com/reference.png">
+
+                <label>Subject Palette (Prompt Only)</label>
+                <div class="class-palette-panel">
+                  <div id="subjectPaletteSwatches" class="class-palette-swatch-grid"></div>
+                  <div class="inline-row class-palette-add-row">
+                    <input id="subjectPaletteHexInput" class="input" type="text" maxlength="7" placeholder="#33aaff">
+                    <input id="subjectPaletteColorInput" class="input class-palette-color-input" type="color" value="#33aaff">
+                    <input id="subjectPaletteSwatchInfluenceInput" class="input class-palette-swatch-influence-input" type="number" min="0" max="100" step="1" value="65" title="Swatch Influence %">
+                    <button id="addSubjectPaletteSwatchBtn" class="btn" type="button">Add</button>
+                    <button id="clearSubjectPaletteBtn" class="btn" type="button">Clear</button>
+                  </div>
+                </div>
+
+                <label for="subjectInput">Subject Description</label>
+                <textarea id="subjectInput" class="input" rows="4" placeholder="barbarian slamming a weapon into the ground, circular shockwave..."></textarea>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <label for="finalPromptOutput">Final Prompt</label>
+        <textarea id="finalPromptOutput" class="input final-prompt" rows="9" readonly></textarea>
+        <div class="prompt-link-panel">
+          <h3>Skill Linking</h3>
+          <div class="compact-controls-row cols-2">
+            <div class="compact-control">
+              <label for="promptLinkSkillSearchInput">Find Skill</label>
+              <input id="promptLinkSkillSearchInput" class="input" type="text" placeholder="Search skill name or id...">
+            </div>
+            <div class="compact-control">
+              <label for="promptLinkSkillSelect">Target Skill</label>
+              <select id="promptLinkSkillSelect" class="input"></select>
+            </div>
+          </div>
+          <div class="action-row">
+            <button id="savePromptToSkillBtn" class="btn btn-primary" type="button">Save Prompt To Skill</button>
+          </div>
+          <div id="promptLinkStatus" class="muted">Select a skill and save subject rules to create prompt versions.</div>
+        </div>
+        <div class="action-row">
+          <button id="copyPromptBtn" class="btn btn-primary" type="button">Copy Prompt</button>
+          <button id="savePromptToVersionBtn" class="btn" type="button">Save Prompt To Version</button>
+          <button id="newVersionFromPromptBtn" class="btn" type="button">New Version From Prompt</button>
+        </div>
+        <div id="copyStatus" class="muted">Ready.</div>
+      </section>
+
+      <section id="skillEntryPanel" class="panel skills-panel collapsed">
+        <div id="skillEntryHeader" class="panel-head accordion-head" role="button" tabindex="0" aria-controls="skillEntryContent" aria-expanded="false">
+          <h2>Skill Entry + Preview</h2>
+          <div class="head-row">
+            <span id="skillEntryChevron" class="accordion-chevron" aria-hidden="true">></span>
+            <button id="newSkillEntryBtn" class="btn compact-btn" type="button">New Skill</button>
+            <label class="btn compact-btn" for="skillsFolderInput">Load Skills Folder</label>
+            <input id="skillsFolderInput" class="hidden" type="file" webkitdirectory directory multiple>
+          </div>
+        </div>
+        <div id="skillEntryContent" class="skill-entry-content">
+        <p id="skillsFolderStatus" class="muted">Using project-relative paths (assets/skills/...).</p>
+
+        <div class="field-grid compact-grid">
+          <label for="skillSearchInput">Skill Search</label>
+          <input id="skillSearchInput" class="input" type="text" placeholder="Search by name, id, or category...">
+        </div>
+
+        <div class="action-row">
+          <button id="previewPromptSettingsBtn" class="btn" type="button">Preview Prompt Settings</button>
+          <div id="promptConfigSummary" class="muted">No prompt settings saved yet.</div>
+        </div>
+        <div class="version-row">
+          <label for="promptConfigVersionSelect">Prompt Versions</label>
+          <select id="promptConfigVersionSelect" class="input"></select>
+          <button id="loadPromptConfigVersionBtn" class="btn" type="button">Load Version</button>
+        </div>
+
+        <div id="skillList" class="skill-list"></div>
+
+        <hr>
+
+        <div class="field-grid">
+          <label for="skillNameInput">Skill Name</label>
+          <input id="skillNameInput" class="input" type="text" maxlength="120">
+
+          <label for="skillClassInput">Class</label>
+          <input id="skillClassInput" class="input" type="text" maxlength="48" placeholder="barbarian">
+
+          <label for="skillCategoryInput">Category</label>
+          <input id="skillCategoryInput" class="input" type="text" maxlength="64" placeholder="Attack, Passive, Utility">
+
+          <label for="skillTierSelect">Skill Type</label>
+          <select id="skillTierSelect" class="input">
+            <option value="normal">Normal Skill</option>
+            <option value="elite">Elite Skill</option>
+          </select>
+
+          <label for="skillFolderPathInput">Folder Path</label>
+          <div class="inline-row">
+            <input id="skillFolderPathInput" class="input" type="text" placeholder="assets/skills/class/barbarian/ground_slam">
+            <button id="suggestPathBtn" class="btn" type="button">Suggest</button>
+          </div>
+
+          <label for="skillTagsInput">Tags (comma separated)</label>
+          <input id="skillTagsInput" class="input" type="text" maxlength="240" placeholder="aoe, barbarian, impact">
+        </div>
+
+        <div class="version-row">
+          <label for="skillVersionSelect">Version</label>
+          <select id="skillVersionSelect" class="input"></select>
+          <button id="newVersionBtn" class="btn" type="button">New Version</button>
+          <button id="duplicateVersionBtn" class="btn" type="button">Duplicate</button>
+        </div>
+
+        <div class="field-grid">
+          <label for="versionImagePathInput">Image Path</label>
+          <input id="versionImagePathInput" class="input" type="text" placeholder="assets/skills/class/barbarian/ground_slam_v02.png">
+
+          <label for="versionPaletteInfluenceInput">Image Color Influence</label>
+          <div class="version-palette-influence-row">
+            <input id="versionPaletteInfluenceInput" class="input" type="range" min="0" max="100" step="1" value="60">
+            <span id="versionPaletteInfluenceValue" class="muted">60%</span>
+          </div>
+
+          <label for="versionNotesInput">Version Notes</label>
+          <textarea id="versionNotesInput" class="input" rows="3" placeholder="What changed in this version?"></textarea>
+        </div>
+
+        <div class="preview-block">
+          <div id="mainPreview" class="main-preview empty">No image selected.</div>
+          <div id="versionThumbGrid" class="version-thumb-grid"></div>
+        </div>
+
+        <hr>
+
+        <div class="asset-audit-head">
+          <h3>Asset Audit</h3>
+          <button id="refreshAuditBtn" class="btn" type="button">Refresh Audit</button>
+        </div>
+        <p id="auditSummary" class="muted">Checking assets...</p>
+        <div id="missingList" class="missing-list"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="../../data.js"></script>
+  <script src="prompter.js"></script>
+</body>
+</html>

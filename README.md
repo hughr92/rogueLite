@@ -13,6 +13,7 @@ Local-only browser roguelike survival prototype built with HTML, CSS, and vanill
 - `tools/index.html` - internal tools launch page
 - `tools/map-editor/` - standalone map editor app for intentional layout authoring
 - `tools/sprite-builder/` - standalone sprite builder/editor app for character asset workflows
+- `tools/skill-prompter/` - standalone skill prompt manager for Midjourney-ready prompts and skill icon audit
 
 ## Run Locally
 

@@ -2782,6 +2782,20 @@
       return ids;
     }
 
+    getRunActiveRangedWeaponSkillId(character) {
+      const equipment =
+        character &&
+        character.inventory &&
+        character.inventory.equipment &&
+        typeof character.inventory.equipment === "object"
+          ? character.inventory.equipment
+          : {};
+      const rangedItem = equipment.rangedWeapon || null;
+      const inferred = this.inferWeaponSkillIdFromItem(rangedItem);
+      if (inferred === "slingshot") return "slingshot";
+      return "javelin";
+    }
+
     isWeaponUpgradeAllowedForRun(run, upgrade) {
       if (!upgrade || typeof upgrade !== "object") return false;
       if (!upgrade.weaponId) return true;
@@ -4536,6 +4550,7 @@
       const width = FIXED_WORLD_WIDTH;
       const height = FIXED_WORLD_HEIGHT;
       const availableWeaponSkillIds = this.getRunEquippedWeaponSkillIds(character);
+      const activeRangedWeaponSkillId = this.getRunActiveRangedWeaponSkillId(character);
       const totalUpgradeCapacity = this.calculateUpgradeCapacityForWeaponSet(availableWeaponSkillIds);
       const level = this.resolveSelectedLevelForCharacter(character, selectedLevel && selectedLevel.id);
       const difficulty = this.resolveSelectedDifficultyForCharacter(character, level, selectedDifficulty);
@@ -4552,6 +4567,7 @@
         bountyDamageBonuses: this.getCharacterBountyDamageBonusMap(character),
         classId: character.classId,
         availableWeaponSkillIds,
+        activeRangedWeaponSkillId,
         progressionLevel: Math.max(1, Math.floor(Number(character.progressionLevel || 1))),
         attributes: {
           strength: Number((character.attributeLevels && character.attributeLevels.strength) || 0),
@@ -4648,7 +4664,11 @@
             piercingVolleyActive: false,
             explosiveVolleyActive: false,
             explosiveRadius: 0,
-            explosiveDamageMultiplier: 0
+            explosiveDamageMultiplier: 0,
+            meteorBarrageActive: false,
+            meteorShardCount: 0,
+            meteorShardLifetimeMultiplier: 0.42,
+            projectileFamily: activeRangedWeaponSkillId === "slingshot" ? "slingshot" : "javelin"
           }
         },
         progression: {
@@ -5036,7 +5056,12 @@
           hitMap: {},
           explosiveVolleyActive: Boolean(javelin.explosiveVolleyActive),
           explosiveRadius: Math.max(0, Number(javelin.explosiveRadius || 0)),
-          explosiveDamageMultiplier: Math.max(0, Number(javelin.explosiveDamageMultiplier || 0))
+          explosiveDamageMultiplier: Math.max(0, Number(javelin.explosiveDamageMultiplier || 0)),
+          meteorBarrageActive: Boolean(javelin.meteorBarrageActive),
+          meteorShardCount: Math.max(0, Math.floor(Number(javelin.meteorShardCount || 0))),
+          meteorShardLifetimeMultiplier: clamp(Number(javelin.meteorShardLifetimeMultiplier || 0.42), 0.2, 0.8),
+          canMeteorSplit: Boolean(javelin.meteorBarrageActive),
+          projectileFamily: String(javelin.projectileFamily || "javelin").trim() || "javelin"
         });
       }
     }
@@ -5057,6 +5082,47 @@
         if (dx * dx + dy * dy > splashSq) return;
         this.damageEnemy(enemy, splashDamage, "ranged");
       });
+    }
+
+    spawnMeteorBarrageShardsFromProjectile(projectile, originX, originY) {
+      const run = this.currentRun;
+      if (!run) return;
+      const shardCount = Math.max(0, Math.floor(Number(projectile && projectile.meteorShardCount || 0)));
+      if (shardCount <= 0) return;
+
+      const incomingAngle = Math.atan2(Number(projectile.vy || 0), Number(projectile.vx || 1));
+      const incomingSpeed = Math.hypot(Number(projectile.vx || 0), Number(projectile.vy || 0));
+      const shardSpeed = Math.max(150, incomingSpeed * 0.9);
+      const shardLife = Math.max(
+        0.16,
+        Number(projectile.life || 0.6) * clamp(Number(projectile.meteorShardLifetimeMultiplier || 0.42), 0.2, 0.8)
+      );
+      const shardDamage = Math.max(1, Number(projectile.damage || 1));
+      const shardRadius = Math.max(2.8, Number(projectile.radius || 4) * 0.82);
+
+      for (let i = 0; i < shardCount; i += 1) {
+        const angle = incomingAngle + (Math.PI * 2 * i) / shardCount;
+        run.entities.playerProjectiles.push({
+          id: this.nextEntityId(),
+          x: originX,
+          y: originY,
+          vx: Math.cos(angle) * shardSpeed,
+          vy: Math.sin(angle) * shardSpeed,
+          radius: shardRadius,
+          damage: shardDamage,
+          life: shardLife,
+          remainingHits: 1,
+          hitMap: {},
+          explosiveVolleyActive: false,
+          explosiveRadius: 0,
+          explosiveDamageMultiplier: 0,
+          meteorBarrageActive: false,
+          meteorShardCount: 0,
+          meteorShardLifetimeMultiplier: 0,
+          canMeteorSplit: false,
+          projectileFamily: "slingshot_shard"
+        });
+      }
     }
 
     updateSpawns(dt) {
@@ -5739,6 +5805,10 @@
               enemy.id
             );
           }
+          if (projectile.meteorBarrageActive && projectile.canMeteorSplit) {
+            this.spawnMeteorBarrageShardsFromProjectile(projectile, projectile.x, projectile.y);
+            projectile.canMeteorSplit = false;
+          }
           projectile.remainingHits -= 1;
           if (projectile.remainingHits <= 0) {
             consumed = true;
@@ -6299,25 +6369,53 @@
       const javelinVolleyRank = this.getUpgradeRankForRun(run, "javelin_volley");
       const javelinPierceRank = this.getUpgradeRankForRun(run, "javelin_long_flight");
       const javelinUltimate = this.getUpgradeRankForRun(run, "javelin_piercing_volley") > 0;
+      const slingshotRapidPebblesRank = this.getUpgradeRankForRun(run, "slingshot_rapid_pebbles");
+      const slingshotShatterstoneRank = this.getUpgradeRankForRun(run, "slingshot_shatterstone");
+      const slingshotMeteorBarrage = this.getUpgradeRankForRun(run, "slingshot_meteor_barrage") > 0;
       const axeMasteryFlatBonus = this.getWeaponMasteryFlatBonusForSource(run, "melee");
       const javelinMasteryFlatBonus = this.getWeaponMasteryFlatBonusForSource(run, "ranged");
+      const rangedWeaponFamily = String(run.activeRangedWeaponSkillId || "javelin").trim().toLowerCase();
+      const usingSlingshot = rangedWeaponFamily === "slingshot";
 
       player.axe.damage = (player.axe.baseDamage + axeMasteryFlatBonus) * damageMultiplier * (axeWhirlwind ? 1.2 : 1);
-      player.javelin.damage = (player.javelin.baseDamage + javelinMasteryFlatBonus) * damageMultiplier * (javelinUltimate ? 1.1 : 1);
-      player.javelin.cooldown = Math.max(0.1, player.javelin.baseCooldown * cooldownMultiplier);
-      player.javelin.speed = player.javelin.baseSpeed;
-      player.javelin.range = player.javelin.baseRange * (1 + (javelinUltimate ? 0.08 : 0));
-      player.javelin.count = player.javelin.baseCount + javelinVolleyRank + (javelinUltimate ? 1 : 0);
-      const pierceBonusFromPath = Math.max(0, Math.floor((javelinPierceRank + 1) / 2));
-      player.javelin.pierce =
-        player.javelin.basePierce +
-        pierceBonusFromPath +
-        (javelinUltimate ? 1 : 0) +
-        (player.rage && player.rage.active && effects.rageAttackModifierUnlocked ? 1 : 0);
-      player.javelin.piercingVolleyActive = player.javelin.pierce > player.javelin.basePierce;
-      player.javelin.explosiveVolleyActive = javelinUltimate;
-      player.javelin.explosiveRadius = javelinUltimate ? player.javelin.baseExplosiveRadius : 0;
-      player.javelin.explosiveDamageMultiplier = javelinUltimate ? player.javelin.baseExplosiveDamageMultiplier : 0;
+      player.javelin.damage = (player.javelin.baseDamage + javelinMasteryFlatBonus) * damageMultiplier * (javelinUltimate && !usingSlingshot ? 1.1 : 1);
+      if (usingSlingshot) {
+        const fireRateBonus = Math.max(0, slingshotRapidPebblesRank) * 0.08;
+        const shatterRadiusByRank = [0, 8, 14, 20, 24, 28];
+        const shatterRadius = shatterRadiusByRank[Math.max(0, Math.min(5, slingshotShatterstoneRank))] || 0;
+        player.javelin.cooldown = Math.max(0.1, player.javelin.baseCooldown * cooldownMultiplier * Math.max(0.55, 1 - fireRateBonus));
+        player.javelin.speed = player.javelin.baseSpeed * 0.94;
+        player.javelin.range = player.javelin.baseRange * 0.9;
+        player.javelin.count = Math.max(1, player.javelin.baseCount);
+        player.javelin.pierce = player.javelin.basePierce + (player.rage && player.rage.active && effects.rageAttackModifierUnlocked ? 1 : 0);
+        player.javelin.piercingVolleyActive = false;
+        player.javelin.explosiveVolleyActive = shatterRadius > 0;
+        player.javelin.explosiveRadius = shatterRadius;
+        player.javelin.explosiveDamageMultiplier = shatterRadius > 0 ? 0.7 : 0;
+        player.javelin.meteorBarrageActive = slingshotMeteorBarrage;
+        player.javelin.meteorShardCount = slingshotMeteorBarrage ? 6 : 0;
+        player.javelin.meteorShardLifetimeMultiplier = 0.42;
+        player.javelin.projectileFamily = "slingshot";
+      } else {
+        player.javelin.cooldown = Math.max(0.1, player.javelin.baseCooldown * cooldownMultiplier);
+        player.javelin.speed = player.javelin.baseSpeed;
+        player.javelin.range = player.javelin.baseRange * (1 + (javelinUltimate ? 0.08 : 0));
+        player.javelin.count = player.javelin.baseCount + javelinVolleyRank + (javelinUltimate ? 1 : 0);
+        const pierceBonusFromPath = Math.max(0, Math.floor((javelinPierceRank + 1) / 2));
+        player.javelin.pierce =
+          player.javelin.basePierce +
+          pierceBonusFromPath +
+          (javelinUltimate ? 1 : 0) +
+          (player.rage && player.rage.active && effects.rageAttackModifierUnlocked ? 1 : 0);
+        player.javelin.piercingVolleyActive = player.javelin.pierce > player.javelin.basePierce;
+        player.javelin.explosiveVolleyActive = javelinUltimate;
+        player.javelin.explosiveRadius = javelinUltimate ? player.javelin.baseExplosiveRadius : 0;
+        player.javelin.explosiveDamageMultiplier = javelinUltimate ? player.javelin.baseExplosiveDamageMultiplier : 0;
+        player.javelin.meteorBarrageActive = false;
+        player.javelin.meteorShardCount = 0;
+        player.javelin.meteorShardLifetimeMultiplier = 0.42;
+        player.javelin.projectileFamily = "javelin";
+      }
     }
 
     applyUpgrade(upgrade) {
