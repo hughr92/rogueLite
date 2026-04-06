@@ -25,11 +25,13 @@
         <button id="openFileBtn" class="btn">Open File</button>
         <input id="openFileInput" class="hidden" type="file" accept="application/json,.json">
         <button id="saveFileBtn" class="btn btn-primary">Save File</button>
+        <button id="exportBundleBtn" class="btn">Export Bundle JS</button>
         <button id="copyJsonBtn" class="btn">Copy JSON</button>
         <button id="saveLocalBtn" class="btn">Save Local</button>
         <select id="localMapSelect" class="input local-select"></select>
         <button id="loadLocalBtn" class="btn">Load Local</button>
         <button id="validateBtn" class="btn">Validate</button>
+        <button id="testMapBtn" class="btn">Test Map</button>
       </div>
     </header>
 
@@ -101,8 +103,8 @@
         </div>
 
         <div class="field-block compact">
-          <label for="gridSizeInput">Grid Size</label>
-          <input id="gridSizeInput" class="input" type="number" min="8" step="1" value="32">
+          <label for="gridSizeInput">Grid Size (px per square)</label>
+          <input id="gridSizeInput" class="input" type="number" min="8" step="1" value="1000">
         </div>
 
         <h2>Background Guide</h2>
@@ -113,14 +115,42 @@
         </div>
 
         <div class="field-block">
+          <button id="importBackgroundTileBtn" class="btn">Import Tile</button>
+          <input id="importBackgroundTileInput" class="hidden" type="file" accept="image/png,image/jpeg,image/jpg">
+          <button id="clearBackgroundTileBtn" class="btn">Clear Tile</button>
+        </div>
+
+        <div class="field-block compact">
+          <label for="backgroundTileSizeInput">Tile Size (world px square)</label>
+          <input id="backgroundTileSizeInput" class="input" type="number" min="16" step="16" value="512">
+        </div>
+
+        <div class="field-block compact">
+          <label for="backgroundBaseColorInput">Bottom Layer Color</label>
+          <input id="backgroundBaseColorInput" class="input" type="color" value="#1c2a23">
+        </div>
+
+        <div class="field-block">
           <label for="backgroundOpacityInput">Background Opacity</label>
-          <input id="backgroundOpacityInput" class="input" type="range" min="0" max="1" step="0.05" value="0.5">
+          <div class="selection-row">
+            <input id="backgroundOpacityInput" class="input" type="range" min="0" max="1" step="0.05" value="0.5">
+            <input id="backgroundOpacityNumberInput" class="input" type="number" min="0" max="1" step="0.05" value="0.5">
+          </div>
           <div id="backgroundOpacityLabel" class="slider-value">0.50</div>
         </div>
 
         <div class="field-block">
+          <label for="backgroundTileOpacityInput">Tile Opacity</label>
+          <div class="selection-row">
+            <input id="backgroundTileOpacityInput" class="input" type="range" min="0" max="1" step="0.05" value="1">
+            <input id="backgroundTileOpacityNumberInput" class="input" type="number" min="0" max="1" step="0.05" value="1">
+          </div>
+          <div id="backgroundTileOpacityLabel" class="slider-value">1.00</div>
+        </div>
+
+        <div class="field-block">
           <label for="backgroundScaleInput">Background Scale</label>
-          <input id="backgroundScaleInput" class="input" type="range" min="0.2" max="3" step="0.05" value="1">
+          <input id="backgroundScaleInput" class="input" type="range" min="0.2" max="10" step="0.05" value="1">
           <div id="backgroundScaleLabel" class="slider-value">1.00x</div>
         </div>
 
@@ -139,11 +169,12 @@
           <h3>Canvas Controls</h3>
           <p><strong>Paint:</strong> click-drag</p>
           <p><strong>Eraser:</strong> click-drag</p>
-          <p><strong>Play Area:</strong> left adds, right removes</p>
-          <p><strong>Play Area Rect:</strong> click-drag rectangle (left sets full field, right removes)</p>
+          <p><strong>Play Area:</strong> left adds, right-click removes, right-drag pans view</p>
+          <p><strong>Play Area Rect:</strong> click-drag rectangle (left sets full field, right-click removes, right-drag pans)</p>
           <p><strong>Player Start:</strong> click to place the run start ping</p>
-          <p><strong>Pan:</strong> middle mouse drag or hold <code>Space</code> + drag</p>
+          <p><strong>Pan:</strong> right mouse drag, middle mouse drag, or hold <code>Space</code> + drag</p>
           <p><strong>Zoom:</strong> mouse wheel</p>
+          <p><strong>Test Map:</strong> use <code>WASD</code> or arrow keys, press <code>Esc</code> to exit</p>
           <p><strong>Undo/Redo:</strong> <code>Ctrl+Z</code> / <code>Ctrl+Y</code></p>
         </div>
       </aside>
@@ -153,7 +184,12 @@
         <div id="canvasOverlay" class="canvas-overlay">
           <span id="modeLabel">Tool: Select</span>
           <span id="coordsLabel">World: 0, 0</span>
-          <span id="zoomLabel">Zoom: 100%</span>
+          <div class="canvas-zoom-controls">
+            <button id="zoomOutBtn" class="btn canvas-zoom-btn" type="button" aria-label="Zoom out">-</button>
+            <span id="zoomLabel">Zoom: 100%</span>
+            <button id="zoomResetBtn" class="btn canvas-zoom-btn" type="button" aria-label="Reset zoom">100%</button>
+            <button id="zoomInBtn" class="btn canvas-zoom-btn" type="button" aria-label="Zoom in">+</button>
+          </div>
         </div>
       </section>
 

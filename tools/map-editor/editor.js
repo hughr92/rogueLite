@@ -4,13 +4,18 @@
   const LOCAL_LEVEL_SLOTS_KEY = "rl_map_editor_level_slots_v2";
   const DEFAULT_MAP_SIZE = { width: 2200, height: 1500 };
   const HISTORY_LIMIT = 60;
+  const GAMEPLAY_CAMERA_BASE_WIDTH = 48 * 20;
+  const GAMEPLAY_CAMERA_BASE_HEIGHT = 48 * 20;
+  // Match the current live run player baseline from data.js (PLAYER_BASE).
+  const TEST_PLAYER_RADIUS = 16;
+  const TEST_PLAYER_MOVE_SPEED = 195;
 
   const LEVEL_OPTIONS = Array.from({ length: 10 }, (_, index) => {
     const levelIndex = index + 1;
     return { id: `level_${levelIndex}`, index: levelIndex, label: `Level ${levelIndex}` };
   });
   const BUNDLED_LEVEL_TEMPLATE_PATHS = {
-    level_1: "./maps/level_1_v1.json"
+    level_1: "./maps/level_1_layout.json"
   };
 
   const TERRAIN_TYPES = [
@@ -61,11 +66,20 @@
     importBackgroundBtn: document.getElementById("importBackgroundBtn"),
     importBackgroundInput: document.getElementById("importBackgroundInput"),
     clearBackgroundBtn: document.getElementById("clearBackgroundBtn"),
+    importBackgroundTileBtn: document.getElementById("importBackgroundTileBtn"),
+    importBackgroundTileInput: document.getElementById("importBackgroundTileInput"),
+    clearBackgroundTileBtn: document.getElementById("clearBackgroundTileBtn"),
+    backgroundTileSizeInput: document.getElementById("backgroundTileSizeInput"),
+    backgroundBaseColorInput: document.getElementById("backgroundBaseColorInput"),
     backgroundOpacityInput: document.getElementById("backgroundOpacityInput"),
+    backgroundOpacityNumberInput: document.getElementById("backgroundOpacityNumberInput"),
     backgroundScaleInput: document.getElementById("backgroundScaleInput"),
     backgroundOffsetXInput: document.getElementById("backgroundOffsetXInput"),
     backgroundOffsetYInput: document.getElementById("backgroundOffsetYInput"),
+    backgroundTileOpacityInput: document.getElementById("backgroundTileOpacityInput"),
+    backgroundTileOpacityNumberInput: document.getElementById("backgroundTileOpacityNumberInput"),
     backgroundOpacityLabel: document.getElementById("backgroundOpacityLabel"),
+    backgroundTileOpacityLabel: document.getElementById("backgroundTileOpacityLabel"),
     backgroundScaleLabel: document.getElementById("backgroundScaleLabel"),
     clearPlayAreaBtn: document.getElementById("clearPlayAreaBtn"),
     playAreaSummary: document.getElementById("playAreaSummary"),
@@ -80,6 +94,9 @@
     modeLabel: document.getElementById("modeLabel"),
     coordsLabel: document.getElementById("coordsLabel"),
     zoomLabel: document.getElementById("zoomLabel"),
+    zoomOutBtn: document.getElementById("zoomOutBtn"),
+    zoomResetBtn: document.getElementById("zoomResetBtn"),
+    zoomInBtn: document.getElementById("zoomInBtn"),
     statusText: document.getElementById("statusText"),
     validationText: document.getElementById("validationText"),
     undoBtn: document.getElementById("undoBtn"),
@@ -88,11 +105,13 @@
     openFileBtn: document.getElementById("openFileBtn"),
     openFileInput: document.getElementById("openFileInput"),
     saveFileBtn: document.getElementById("saveFileBtn"),
+    exportBundleBtn: document.getElementById("exportBundleBtn"),
     copyJsonBtn: document.getElementById("copyJsonBtn"),
     saveLocalBtn: document.getElementById("saveLocalBtn"),
     localMapSelect: document.getElementById("localMapSelect"),
     loadLocalBtn: document.getElementById("loadLocalBtn"),
     validateBtn: document.getElementById("validateBtn"),
+    testMapBtn: document.getElementById("testMapBtn"),
     levelEditSelect: document.getElementById("levelEditSelect")
   };
 
@@ -104,18 +123,19 @@
     tool: "select",
     selectedTerrainId: null,
     camera: { x: DEFAULT_MAP_SIZE.width * 0.5, y: DEFAULT_MAP_SIZE.height * 0.5, zoom: 0.45 },
-    keyboard: { space: false },
+    keyboard: { space: false, moveUp: false, moveDown: false, moveLeft: false, moveRight: false },
     hoverWorld: { x: 0, y: 0 },
     needsRender: true,
     drag: null,
     stroke: null,
     history: { undo: [], redo: [] },
-    grid: { visible: true, size: 32 },
+    grid: { visible: true, size: 1000 },
     brush: { size: 3, density: 0.6, randomness: 0.35, softness: 0.7 },
     layerVisibility: { background: true, terrain: true, props: true, playArea: true, collision: true },
     terrainPlacementType: TERRAIN_TYPES[0].id,
     themePreviewId: THEMES[0].id,
-    assetCache: Object.create(null)
+    assetCache: Object.create(null),
+    testMode: { active: false, player: null, savedCamera: null, lastFrameMs: 0 }
   };
 
   function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
@@ -126,8 +146,17 @@
   function getTheme(themeId) { return THEMES.find((theme) => theme.id === themeId) || THEMES[0]; }
   function getTerrainType(terrainId) { return TERRAIN_TYPES.find((entry) => entry.id === terrainId) || TERRAIN_TYPES[0]; }
   function getTerrainLayer(terrainId) { return getTerrainType(terrainId).layer; }
-  function getGridSize() { return Math.max(8, Number(state.grid.size || 32)); }
+  function getGridSize() { return Math.max(8, Number(state.grid.size || 1000)); }
   function createDefaultBackgroundImage() { return { src: "", opacity: 0.5, scale: 1, offsetX: 0, offsetY: 0 }; }
+  function createDefaultBackgroundTile() { return { src: "", size: 512, opacity: 1 }; }
+  function isHexColor(value) { return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(value || "").trim()); }
+  function expandHexColor(value) {
+    const safe = String(value || "").trim();
+    if (!isHexColor(safe)) return null;
+    if (safe.length === 7) return safe.toLowerCase();
+    return `#${safe[1]}${safe[1]}${safe[2]}${safe[2]}${safe[3]}${safe[3]}`.toLowerCase();
+  }
+  function getDefaultBackgroundBaseColor(themeId) { return expandHexColor((getTheme(themeId) || THEMES[0]).mapFill) || "#1c2a23"; }
   function createDefaultPlayerStart(mapWidth, mapHeight) {
     return {
       x: Math.max(0, Number(mapWidth || DEFAULT_MAP_SIZE.width)) * 0.5,
@@ -149,7 +178,9 @@
       terrain: [],
       props: [],
       playAreaMask: [],
+      backgroundBaseColor: getDefaultBackgroundBaseColor(themeId),
       backgroundImage: null,
+      backgroundTile: null,
       playerStart: createDefaultPlayerStart(DEFAULT_MAP_SIZE.width, DEFAULT_MAP_SIZE.height),
       boundaries: [],
       crossings: []
@@ -175,25 +206,242 @@
 
   function requestRender() { state.needsRender = true; }
   function getCanvasPointFromEvent(event) { const rect = dom.canvas.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; }
+  function getActiveViewportFrame() {
+    const canvasWidth = Math.max(1, Number(dom.canvas.width || 1));
+    const canvasHeight = Math.max(1, Number(dom.canvas.height || 1));
+    if (!state.testMode.active) {
+      return { x: 0, y: 0, width: canvasWidth, height: canvasHeight };
+    }
+    const targetAspect = Math.max(0.1, Number(window.innerWidth || canvasWidth)) / Math.max(1, Number(window.innerHeight || canvasHeight));
+    const canvasAspect = canvasWidth / canvasHeight;
+    if (canvasAspect > targetAspect) {
+      const width = canvasHeight * targetAspect;
+      return {
+        x: (canvasWidth - width) * 0.5,
+        y: 0,
+        width,
+        height: canvasHeight
+      };
+    }
+    const height = canvasWidth / targetAspect;
+    return {
+      x: 0,
+      y: (canvasHeight - height) * 0.5,
+      width: canvasWidth,
+      height
+    };
+  }
+  function getCameraViewportHalfExtents() {
+    const frame = getActiveViewportFrame();
+    const zoom = Math.max(0.0001, Number(state.camera.zoom || 1));
+    return {
+      x: frame.width * 0.5 / zoom,
+      y: frame.height * 0.5 / zoom
+    };
+  }
+  function getGameplayCameraAxisSize(worldSize, baseSize) {
+    const safeWorldSize = Math.max(1, Number(worldSize || baseSize || 1));
+    const safeBaseSize = Math.max(1, Number(baseSize || safeWorldSize || 1));
+    if (safeWorldSize <= safeBaseSize) return safeWorldSize;
+    if (safeWorldSize < safeBaseSize * 2) return Math.max(1, Math.floor(safeWorldSize * 0.5));
+    return safeBaseSize;
+  }
+  function getGameplayCameraWindowForMap() {
+    return {
+      width: getGameplayCameraAxisSize(state.map.width, GAMEPLAY_CAMERA_BASE_WIDTH),
+      height: getGameplayCameraAxisSize(state.map.height, GAMEPLAY_CAMERA_BASE_HEIGHT)
+    };
+  }
+  function getGameplayEquivalentEditorZoom() {
+    const cameraWindow = getGameplayCameraWindowForMap();
+    const frame = getActiveViewportFrame();
+    const safeCanvasWidth = Math.max(1, Number(frame.width || 1));
+    const safeCanvasHeight = Math.max(1, Number(frame.height || 1));
+    return Math.max(
+      0.05,
+      Math.min(
+        safeCanvasWidth / Math.max(1, Number(cameraWindow.width || 1)),
+        safeCanvasHeight / Math.max(1, Number(cameraWindow.height || 1))
+      )
+    );
+  }
 
   function worldToScreen(point) {
-    const cw = dom.canvas.width;
-    const ch = dom.canvas.height;
-    return { x: (point.x - state.camera.x) * state.camera.zoom + cw * 0.5, y: (point.y - state.camera.y) * state.camera.zoom + ch * 0.5 };
+    const frame = getActiveViewportFrame();
+    return {
+      x: (point.x - state.camera.x) * state.camera.zoom + frame.x + frame.width * 0.5,
+      y: (point.y - state.camera.y) * state.camera.zoom + frame.y + frame.height * 0.5
+    };
   }
 
   function screenToWorld(point) {
-    const cw = dom.canvas.width;
-    const ch = dom.canvas.height;
-    return { x: (point.x - cw * 0.5) / state.camera.zoom + state.camera.x, y: (point.y - ch * 0.5) / state.camera.zoom + state.camera.y };
+    const frame = getActiveViewportFrame();
+    return {
+      x: (point.x - (frame.x + frame.width * 0.5)) / state.camera.zoom + state.camera.x,
+      y: (point.y - (frame.y + frame.height * 0.5)) / state.camera.zoom + state.camera.y
+    };
   }
 
+  function getCanvasCenterPoint() {
+    const frame = getActiveViewportFrame();
+    return { x: frame.x + frame.width * 0.5, y: frame.y + frame.height * 0.5 };
+  }
+  function setCameraZoom(targetZoom, screenPoint) {
+    const anchor = screenPoint && typeof screenPoint === "object" ? screenPoint : getCanvasCenterPoint();
+    const before = screenToWorld(anchor);
+    state.camera.zoom = clamp(Number(targetZoom || state.camera.zoom), 0.05, 3.5);
+    const after = screenToWorld(anchor);
+    state.camera.x += before.x - after.x;
+    state.camera.y += before.y - after.y;
+    requestRender();
+  }
+  function stepCameraZoom(multiplier, screenPoint) { setCameraZoom(state.camera.zoom * Number(multiplier || 1), screenPoint); }
+  function resetCameraZoom() { setCameraZoom(1, getCanvasCenterPoint()); }
   function clampPointToMap(point) { return { x: clamp(point.x, 0, state.map.width), y: clamp(point.y, 0, state.map.height) }; }
   function pointInsideMap(point) { return point.x >= 0 && point.y >= 0 && point.x <= state.map.width && point.y <= state.map.height; }
+  function clampCameraCenterToMap(point) {
+    const half = getCameraViewportHalfExtents();
+    const minX = Math.min(Number(state.map.width || 0) * 0.5, half.x);
+    const maxX = Math.max(Number(state.map.width || 0) - half.x, minX);
+    const minY = Math.min(Number(state.map.height || 0) * 0.5, half.y);
+    const maxY = Math.max(Number(state.map.height || 0) - half.y, minY);
+    return {
+      x: clamp(Number(point.x || 0), minX, maxX),
+      y: clamp(Number(point.y || 0), minY, maxY)
+    };
+  }
   function worldToGrid(point) { const grid = getGridSize(); return { gx: Math.floor(point.x / grid), gy: Math.floor(point.y / grid) }; }
   function gridToWorld(gx, gy) { const grid = getGridSize(); return { x: (gx + 0.5) * grid, y: (gy + 0.5) * grid }; }
   function terrainKey(gx, gy) { return `${gx}:${gy}`; }
   function playAreaKey(gx, gy) { return `${gx}:${gy}`; }
+  function shouldStartSecondaryStroke(tool) { return tool === "paint" || tool === "eraser" || tool === "play_area" || tool === "play_area_rect" || tool === "river"; }
+  function isMovementKey(code) {
+    return ["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(code);
+  }
+  function setMovementKeyState(code, pressed) {
+    const value = Boolean(pressed);
+    if (code === "KeyW" || code === "ArrowUp") state.keyboard.moveUp = value;
+    if (code === "KeyS" || code === "ArrowDown") state.keyboard.moveDown = value;
+    if (code === "KeyA" || code === "ArrowLeft") state.keyboard.moveLeft = value;
+    if (code === "KeyD" || code === "ArrowRight") state.keyboard.moveRight = value;
+  }
+  function isWorldPointInsidePlayableArea(point) {
+    if (!pointInsideMap(point)) return false;
+    const cells = Array.isArray(state.map.playAreaMask) ? state.map.playAreaMask : [];
+    if (!cells.length) return true;
+    const gridPoint = worldToGrid(point);
+    return cells.some((cell) => cell && cell.gx === gridPoint.gx && cell.gy === gridPoint.gy);
+  }
+  function getTestModeStartPoint() {
+    const configuredStart = normalizePlayerStart(state.map.playerStart, state.map.width, state.map.height);
+    if (isWorldPointInsidePlayableArea(configuredStart)) return configuredStart;
+    if (Array.isArray(state.map.playAreaMask) && state.map.playAreaMask.length) {
+      const firstPlayableCell = state.map.playAreaMask[0];
+      if (firstPlayableCell) {
+        const center = gridToWorld(firstPlayableCell.gx, firstPlayableCell.gy);
+        return clampPointToMap(center);
+      }
+    }
+    return configuredStart;
+  }
+  function syncTestModeButton() {
+    if (!dom.testMapBtn) return;
+    dom.testMapBtn.textContent = state.testMode.active ? "Stop Test" : "Test Map";
+    dom.testMapBtn.classList.toggle("btn-primary", state.testMode.active);
+    dom.testMapBtn.setAttribute("aria-pressed", state.testMode.active ? "true" : "false");
+    dom.canvas.style.cursor = state.testMode.active ? "default" : "crosshair";
+  }
+  function centerCameraOnTestPlayer() {
+    if (!state.testMode.active || !state.testMode.player) return;
+    const clampedCamera = clampCameraCenterToMap(state.testMode.player);
+    state.camera.x = clampedCamera.x;
+    state.camera.y = clampedCamera.y;
+  }
+  function startTestMode() {
+    if (state.testMode.active) return;
+    const startPoint = getTestModeStartPoint();
+    state.testMode.active = true;
+    state.testMode.player = {
+      x: startPoint.x,
+      y: startPoint.y,
+      radius: TEST_PLAYER_RADIUS,
+      speed: TEST_PLAYER_MOVE_SPEED,
+      facingX: 1,
+      facingY: 0
+    };
+    state.testMode.savedCamera = { x: state.camera.x, y: state.camera.y, zoom: state.camera.zoom };
+    state.testMode.lastFrameMs = performance.now();
+    state.drag = null;
+    state.stroke = null;
+    state.camera.zoom = getGameplayEquivalentEditorZoom();
+    centerCameraOnTestPlayer();
+    syncTestModeButton();
+    setStatus("Test mode active. Move with WASD or arrow keys, press Esc to exit.", "success");
+    requestRender();
+  }
+  function stopTestMode(options) {
+    if (!state.testMode.active) return;
+    const safe = options || {};
+    const savedCamera = state.testMode.savedCamera;
+    state.testMode.active = false;
+    state.testMode.player = null;
+    state.testMode.savedCamera = null;
+    state.testMode.lastFrameMs = 0;
+    state.keyboard.moveUp = false;
+    state.keyboard.moveDown = false;
+    state.keyboard.moveLeft = false;
+    state.keyboard.moveRight = false;
+    if (!safe.skipRestoreCamera && savedCamera) {
+      state.camera.x = Number(savedCamera.x || state.camera.x);
+      state.camera.y = Number(savedCamera.y || state.camera.y);
+      state.camera.zoom = Number(savedCamera.zoom || state.camera.zoom);
+    }
+    syncTestModeButton();
+    if (!safe.silent) setStatus("Returned to map editing.", "success");
+    requestRender();
+  }
+  function toggleTestMode() {
+    if (state.testMode.active) stopTestMode();
+    else startTestMode();
+  }
+  function updateTestMode(now) {
+    if (!state.testMode.active || !state.testMode.player) return;
+    const timestamp = Number(now || performance.now());
+    const previous = Number(state.testMode.lastFrameMs || timestamp);
+    const deltaSeconds = Math.min(0.05, Math.max(0, (timestamp - previous) / 1000));
+    state.testMode.lastFrameMs = timestamp;
+    if (deltaSeconds <= 0) return;
+
+    const previousCameraX = state.camera.x;
+    const previousCameraY = state.camera.y;
+
+    let moveX = 0;
+    let moveY = 0;
+    if (state.keyboard.moveLeft) moveX -= 1;
+    if (state.keyboard.moveRight) moveX += 1;
+    if (state.keyboard.moveUp) moveY -= 1;
+    if (state.keyboard.moveDown) moveY += 1;
+
+    const magnitude = Math.hypot(moveX, moveY);
+    if (magnitude > 0.001) {
+      const normalizedX = moveX / magnitude;
+      const normalizedY = moveY / magnitude;
+      const stepDistance = Number(state.testMode.player.speed || TEST_PLAYER_MOVE_SPEED) * deltaSeconds;
+      const candidateX = clampPointToMap({ x: state.testMode.player.x + normalizedX * stepDistance, y: state.testMode.player.y });
+      if (isWorldPointInsidePlayableArea(candidateX)) state.testMode.player.x = candidateX.x;
+      const candidateY = clampPointToMap({ x: state.testMode.player.x, y: state.testMode.player.y + normalizedY * stepDistance });
+      if (isWorldPointInsidePlayableArea(candidateY)) state.testMode.player.y = candidateY.y;
+      state.testMode.player.facingX = normalizedX;
+      state.testMode.player.facingY = normalizedY;
+    }
+
+    centerCameraOnTestPlayer();
+    if (
+      magnitude > 0.001 ||
+      Math.abs(state.camera.x - previousCameraX) > 0.001 ||
+      Math.abs(state.camera.y - previousCameraY) > 0.001
+    ) requestRender();
+  }
 
   function makeTerrainStamp(gx, gy, terrainType, options) {
     const grid = getGridSize();
@@ -237,7 +485,29 @@
     if (!rawBackground || typeof rawBackground !== "object") return null;
     const src = String(rawBackground.src || "").trim();
     if (!src) return null;
-    return { src, opacity: clamp(Number(rawBackground.opacity || 0.5), 0, 1), scale: clamp(Number(rawBackground.scale || 1), 0.2, 3), offsetX: Number(rawBackground.offsetX || 0), offsetY: Number(rawBackground.offsetY || 0) };
+    return {
+      src,
+      opacity: clamp(Number(rawBackground.opacity ?? 0.5), 0, 1),
+      scale: clamp(Number(rawBackground.scale || 1), 0.2, 10),
+      offsetX: Number(rawBackground.offsetX || 0),
+      offsetY: Number(rawBackground.offsetY || 0)
+    };
+  }
+
+  function normalizeBackgroundTile(rawTile) {
+    if (!rawTile || typeof rawTile !== "object") return null;
+    const src = String(rawTile.src || "").trim();
+    if (!src) return null;
+    const parsedSize = Number(rawTile.size);
+    return {
+      src,
+      size: Number.isFinite(parsedSize) ? clamp(Math.round(parsedSize), 16, 10000) : 512,
+      opacity: clamp(Number(rawTile.opacity ?? 1), 0, 1)
+    };
+  }
+
+  function normalizeBackgroundBaseColor(rawColor, fallbackColor) {
+    return expandHexColor(rawColor) || expandHexColor(fallbackColor) || "#1c2a23";
   }
 
   function normalizePlayerStart(rawPlayerStart, mapWidth, mapHeight) {
@@ -268,7 +538,9 @@
       terrain: [],
       props: Array.isArray(source.props) ? deepClone(source.props) : [],
       playAreaMask: normalizePlayAreaMask(source.playAreaMask, width, height),
+      backgroundBaseColor: normalizeBackgroundBaseColor(source.backgroundBaseColor, getTheme(theme).mapFill),
       backgroundImage: normalizeBackgroundImage(source.backgroundImage),
+      backgroundTile: normalizeBackgroundTile(source.backgroundTile),
       playerStart: normalizePlayerStart(source.playerStart, width, height),
       boundaries: Array.isArray(source.boundaries) ? deepClone(source.boundaries) : [],
       crossings: Array.isArray(source.crossings) ? deepClone(source.crossings) : []
@@ -295,7 +567,9 @@
       terrain,
       props,
       playAreaMask: deepClone(state.map.playAreaMask),
+      backgroundBaseColor: normalizeBackgroundBaseColor(state.map.backgroundBaseColor, getTheme(state.map.theme).mapFill),
       backgroundImage: state.map.backgroundImage ? deepClone(state.map.backgroundImage) : null,
+      backgroundTile: state.map.backgroundTile ? deepClone(state.map.backgroundTile) : null,
       playerStart: state.map.playerStart ? deepClone(state.map.playerStart) : null,
       terrainObjects,
       boundaries: Array.isArray(state.map.boundaries) ? deepClone(state.map.boundaries) : [],
@@ -691,7 +965,7 @@
     const bottomRight = worldToScreen({ x: state.map.width, y: state.map.height });
     const width = bottomRight.x - topLeft.x;
     const height = bottomRight.y - topLeft.y;
-    ctx.fillStyle = theme.mapFill;
+    ctx.fillStyle = normalizeBackgroundBaseColor(state.map.backgroundBaseColor, theme.mapFill);
     ctx.fillRect(topLeft.x, topLeft.y, width, height);
     ctx.strokeStyle = theme.mapBorder;
     ctx.lineWidth = 2;
@@ -804,6 +1078,7 @@
 
   function drawBackgroundLayer() {
     if (!state.layerVisibility.background) return;
+    drawBackgroundTileLayer();
     if (!state.map.backgroundImage || !state.map.backgroundImage.src) return;
     const bg = state.map.backgroundImage;
     const image = loadImageCached(bg.src);
@@ -812,14 +1087,64 @@
     const width = image.naturalWidth * Number(bg.scale || 1) * state.camera.zoom;
     const height = image.naturalHeight * Number(bg.scale || 1) * state.camera.zoom;
     ctx.save();
-    ctx.globalAlpha = clamp(Number(bg.opacity || 0.5), 0, 1);
+    ctx.globalAlpha = clamp(Number(bg.opacity ?? 0.5), 0, 1);
     ctx.drawImage(image, center.x - width * 0.5, center.y - height * 0.5, width, height);
     ctx.restore();
   }
 
+  function drawBackgroundTileLayer() {
+    if (!state.map.backgroundTile || !state.map.backgroundTile.src) return;
+    const tile = state.map.backgroundTile;
+    const tileSize = clamp(Math.round(Number(tile.size || 512)), 16, 10000);
+    const image = loadImageCached(tile.src);
+    const opacity = clamp(Number(tile.opacity ?? 1), 0, 1);
+    const frame = getActiveViewportFrame();
+    const topLeftWorld = screenToWorld({ x: frame.x, y: frame.y });
+    const bottomRightWorld = screenToWorld({ x: frame.x + frame.width, y: frame.y + frame.height });
+    const minX = clamp(Math.min(topLeftWorld.x, bottomRightWorld.x), 0, state.map.width);
+    const maxX = clamp(Math.max(topLeftWorld.x, bottomRightWorld.x), 0, state.map.width);
+    const minY = clamp(Math.min(topLeftWorld.y, bottomRightWorld.y), 0, state.map.height);
+    const maxY = clamp(Math.max(topLeftWorld.y, bottomRightWorld.y), 0, state.map.height);
+    const startX = Math.floor(minX / tileSize) * tileSize;
+    const startY = Math.floor(minY / tileSize) * tileSize;
+    const endX = Math.min(state.map.width, Math.ceil(maxX / tileSize) * tileSize + tileSize);
+    const endY = Math.min(state.map.height, Math.ceil(maxY / tileSize) * tileSize + tileSize);
+    const previousSmoothing = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    for (let y = startY; y < endY; y += tileSize) {
+      for (let x = startX; x < endX; x += tileSize) {
+        const drawWidth = Math.min(tileSize, Math.max(0, state.map.width - x));
+        const drawHeight = Math.min(tileSize, Math.max(0, state.map.height - y));
+        if (drawWidth <= 0 || drawHeight <= 0) continue;
+        const topLeft = worldToScreen({ x, y });
+        const bottomRight = worldToScreen({ x: x + drawWidth, y: y + drawHeight });
+        const drawLeft = Math.floor(Math.min(topLeft.x, bottomRight.x));
+        const drawTop = Math.floor(Math.min(topLeft.y, bottomRight.y));
+        const drawRight = Math.ceil(Math.max(topLeft.x, bottomRight.x));
+        const drawBottom = Math.ceil(Math.max(topLeft.y, bottomRight.y));
+        const pixelWidth = Math.max(1, drawRight - drawLeft);
+        const pixelHeight = Math.max(1, drawBottom - drawTop);
+        ctx.save();
+        ctx.globalAlpha = opacity;
+        if (image && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+          ctx.drawImage(image, drawLeft, drawTop, pixelWidth, pixelHeight);
+          ctx.restore();
+          continue;
+        }
+        ctx.fillStyle = ((Math.floor(x / tileSize) + Math.floor(y / tileSize)) % 2 === 0) ? "rgba(40, 52, 68, 0.58)" : "rgba(29, 39, 52, 0.58)";
+        ctx.fillRect(drawLeft, drawTop, pixelWidth, pixelHeight);
+        ctx.strokeStyle = "rgba(101, 124, 150, 0.22)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(drawLeft, drawTop, pixelWidth, pixelHeight);
+        ctx.restore();
+      }
+    }
+    ctx.imageSmoothingEnabled = previousSmoothing;
+  }
+
   function drawGrid(theme) {
     if (!state.grid.visible) return;
-    const spacing = Math.max(8, Number(state.grid.size || 32));
+    const spacing = Math.max(8, Number(state.grid.size || 1000));
     ctx.strokeStyle = theme.grid;
     ctx.lineWidth = 1;
     const topLeftWorld = screenToWorld({ x: 0, y: 0 });
@@ -977,6 +1302,57 @@
     ctx.restore();
   }
 
+  function drawTestModePlayer() {
+    if (!state.testMode.active || !state.testMode.player) return;
+    const player = state.testMode.player;
+    const center = worldToScreen(player);
+    const radius = Math.max(12, Number(player.radius || TEST_PLAYER_RADIUS) * state.camera.zoom);
+    const facingX = Number(player.facingX || 1);
+    const facingY = Number(player.facingY || 0);
+    const outlineWidth = Math.max(2, radius * 0.14);
+
+    ctx.save();
+    ctx.fillStyle = "rgba(16, 18, 24, 0.35)";
+    ctx.beginPath();
+    ctx.ellipse(center.x, center.y + radius * 0.72, radius * 0.72, radius * 0.34, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(255, 214, 112, 0.96)";
+    ctx.strokeStyle = "rgba(86, 42, 18, 0.92)";
+    ctx.lineWidth = outlineWidth;
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(136, 72, 28, 0.95)";
+    ctx.beginPath();
+    ctx.moveTo(center.x + facingX * radius * 1.02, center.y + facingY * radius * 1.02);
+    ctx.lineTo(center.x - facingY * radius * 0.28, center.y + facingX * radius * 0.28);
+    ctx.lineTo(center.x + facingY * radius * 0.28, center.y - facingX * radius * 0.28);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(255, 248, 231, 0.96)";
+    ctx.beginPath();
+    ctx.arc(center.x - radius * 0.24, center.y - radius * 0.18, radius * 0.14, 0, Math.PI * 2);
+    ctx.arc(center.x + radius * 0.24, center.y - radius * 0.18, radius * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(56, 30, 18, 0.98)";
+    ctx.beginPath();
+    ctx.arc(center.x - radius * 0.24, center.y - radius * 0.18, radius * 0.07, 0, Math.PI * 2);
+    ctx.arc(center.x + radius * 0.24, center.y - radius * 0.18, radius * 0.07, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.font = `${Math.max(10, Math.round(radius * 0.62))}px monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillStyle = "rgba(255, 244, 214, 0.96)";
+    ctx.fillText("TEST", center.x, center.y - radius - 6);
+    ctx.restore();
+  }
+
   function drawBrushCursor() {
     if (!["paint", "eraser", "play_area", "play_area_rect", "river", "player_start"].includes(state.tool)) return;
     if (!pointInsideMap(state.hoverWorld)) return;
@@ -1003,6 +1379,16 @@
     ctx.restore();
   }
 
+  function drawVirtualViewportFrame() {
+    if (!state.testMode.active) return;
+    const frame = getActiveViewportFrame();
+    ctx.save();
+    ctx.strokeStyle = "rgba(196, 220, 255, 0.5)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(frame.x + 1, frame.y + 1, Math.max(1, frame.width - 2), Math.max(1, frame.height - 2));
+    ctx.restore();
+  }
+
   function render() {
     if (!state.needsRender) return;
     state.needsRender = false;
@@ -1011,21 +1397,37 @@
     ctx.clearRect(0, 0, dom.canvas.width, dom.canvas.height);
     ctx.fillStyle = "#0c121a";
     ctx.fillRect(0, 0, dom.canvas.width, dom.canvas.height);
+    if (state.testMode.active) {
+      const frame = getActiveViewportFrame();
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(frame.x, frame.y, frame.width, frame.height);
+      ctx.clip();
+    }
     drawMapBounds(theme);
     drawBackgroundLayer();
     drawTerrain(theme);
     drawPlayAreaOverlay();
     drawPlayerStartPing();
+    drawTestModePlayer();
     drawGrid(theme);
-    drawRiverPreview();
-    drawPlayAreaRectPreview();
-    drawBrushCursor();
-    dom.modeLabel.textContent = `Tool: ${TOOL_LABELS[state.tool] || state.tool}`;
-    dom.coordsLabel.textContent = `World: ${Math.round(state.hoverWorld.x)}, ${Math.round(state.hoverWorld.y)}`;
+    if (!state.testMode.active) {
+      drawRiverPreview();
+      drawPlayAreaRectPreview();
+      drawBrushCursor();
+    }
+    if (state.testMode.active) {
+      ctx.restore();
+      drawVirtualViewportFrame();
+    }
+    dom.modeLabel.textContent = state.testMode.active ? "Mode: Test Map" : `Tool: ${TOOL_LABELS[state.tool] || state.tool}`;
+    dom.coordsLabel.textContent = state.testMode.active && state.testMode.player
+      ? `Player: ${Math.round(state.testMode.player.x)}, ${Math.round(state.testMode.player.y)}`
+      : `World: ${Math.round(state.hoverWorld.x)}, ${Math.round(state.hoverWorld.y)}`;
     dom.zoomLabel.textContent = `Zoom: ${(state.camera.zoom * 100).toFixed(0)}%`;
   }
 
-  function renderLoop() { render(); requestAnimationFrame(renderLoop); }
+  function renderLoop(now) { updateTestMode(now); render(); requestAnimationFrame(renderLoop); }
 
   function syncMapInputs() {
     dom.mapIdInput.value = state.map.id;
@@ -1046,11 +1448,18 @@
 
   function syncBackgroundControls() {
     const bg = state.map.backgroundImage || createDefaultBackgroundImage();
-    dom.backgroundOpacityInput.value = String(clamp(Number(bg.opacity || 0.5), 0, 1));
-    dom.backgroundScaleInput.value = String(clamp(Number(bg.scale || 1), 0.2, 3));
+    const tile = state.map.backgroundTile || createDefaultBackgroundTile();
+    dom.backgroundBaseColorInput.value = normalizeBackgroundBaseColor(state.map.backgroundBaseColor, getTheme(state.map.theme).mapFill);
+    dom.backgroundTileSizeInput.value = String(clamp(Math.round(Number(tile.size || 512)), 16, 10000));
+    dom.backgroundOpacityInput.value = String(clamp(Number(bg.opacity ?? 0.5), 0, 1));
+    dom.backgroundOpacityNumberInput.value = String(clamp(Number(bg.opacity ?? 0.5), 0, 1));
+    dom.backgroundTileOpacityInput.value = String(clamp(Number(tile.opacity ?? 1), 0, 1));
+    dom.backgroundTileOpacityNumberInput.value = String(clamp(Number(tile.opacity ?? 1), 0, 1));
+    dom.backgroundScaleInput.value = String(clamp(Number(bg.scale || 1), 0.2, 10));
     dom.backgroundOffsetXInput.value = String(Math.round(Number(bg.offsetX || 0)));
     dom.backgroundOffsetYInput.value = String(Math.round(Number(bg.offsetY || 0)));
     dom.backgroundOpacityLabel.textContent = Number(dom.backgroundOpacityInput.value).toFixed(2);
+    dom.backgroundTileOpacityLabel.textContent = Number(dom.backgroundTileOpacityInput.value).toFixed(2);
     dom.backgroundScaleLabel.textContent = `${Number(dom.backgroundScaleInput.value).toFixed(2)}x`;
   }
 
@@ -1085,6 +1494,7 @@
   }
 
   function loadIntoState(mapData, options) {
+    stopTestMode({ skipRestoreCamera: true, silent: true });
     const safe = options || {};
     if (safe.activeLevelId && LEVEL_OPTIONS.some((level) => level.id === safe.activeLevelId)) state.activeLevelId = safe.activeLevelId;
     state.map = normalizeMapData(mapData);
@@ -1103,6 +1513,7 @@
     updatePlayerStartSummary();
     renderSelectionProperties();
     setValidationSummary([], []);
+    syncTestModeButton();
     setStatus(`Loaded map "${state.map.name}".`, "success");
     requestRender();
   }
@@ -1125,6 +1536,44 @@
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     setStatus("Map exported to JSON file.", "success");
+  }
+
+  function buildBundledLevelMapsPayload() {
+    const slots = readLevelSlots();
+    const payload = {};
+    Object.keys(slots).forEach((levelId) => {
+      const entry = slots[levelId];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
+      payload[levelId] = entry;
+    });
+    payload[state.activeLevelId] = toJsonMap();
+    payload[state.activeLevelId].levelId = state.activeLevelId;
+    return payload;
+  }
+
+  function buildBundledLevelMapsScript() {
+    const payload = buildBundledLevelMapsPayload();
+    return `window.RL_BUNDLED_LEVEL_MAPS = Object.freeze(${JSON.stringify(payload, null, 2)});\n`;
+  }
+
+  function exportBundledLevelMapsFile() {
+    const validation = validateMapData(toJsonMap());
+    setValidationSummary(validation.errors, validation.warnings);
+    if (validation.errors.length) {
+      setStatus("Fix validation errors before exporting the bundle.", "error");
+      return;
+    }
+    const script = buildBundledLevelMapsScript();
+    const blob = new Blob([script], { type: "application/javascript" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "bundled-level-maps.js";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setStatus("Bundled map script exported. Replace tools/map-editor/maps/bundled-level-maps.js with the downloaded file for file:// testing.", "success");
   }
 
   async function copyJsonToClipboard() {
@@ -1279,6 +1728,11 @@
     });
     if (!terrain.length) warnings.push("Map has no painted terrain yet.");
     if (!mask.length) warnings.push("Play area mask is empty (full-map fallback active).");
+    if (mapData.backgroundTile) {
+      const tileSize = Number(mapData.backgroundTile.size);
+      if (!Number.isFinite(tileSize) || tileSize < 16) errors.push("Background tile size must be at least 16.");
+    }
+    if (!isHexColor(mapData.backgroundBaseColor)) errors.push("Bottom layer color must be a valid hex color.");
     const playerStart = mapData.playerStart;
     if (!playerStart || !Number.isFinite(Number(playerStart.x)) || !Number.isFinite(Number(playerStart.y))) {
       warnings.push("Player start is not set. Map center fallback will be used.");
@@ -1411,6 +1865,7 @@
       dom.openFileInput.value = "";
     });
     dom.saveFileBtn.addEventListener("click", saveAsFile);
+    if (dom.exportBundleBtn) dom.exportBundleBtn.addEventListener("click", exportBundledLevelMapsFile);
     dom.copyJsonBtn.addEventListener("click", () => copyJsonToClipboard().catch(() => setStatus("Could not copy JSON to clipboard.", "error")));
     dom.saveLocalBtn.addEventListener("click", saveLocalMap);
     dom.loadLocalBtn.addEventListener("click", loadSelectedLocalMap);
@@ -1421,6 +1876,7 @@
       else if (validation.warnings.length) setStatus(validation.warnings[0]);
       else setStatus("Validation complete: no issues found.", "success");
     });
+    if (dom.testMapBtn) dom.testMapBtn.addEventListener("click", toggleTestMode);
   }
 
   function wireMetadataInputs() {
@@ -1490,7 +1946,7 @@
     dom.brushSoftnessInput.addEventListener("input", () => { state.brush.softness = clamp(Number(dom.brushSoftnessInput.value || 0.7), 0, 1); syncBrushLabels(); requestRender(); });
 
     dom.gridVisibleChk.addEventListener("change", () => { state.grid.visible = dom.gridVisibleChk.checked; requestRender(); });
-    dom.gridSizeInput.addEventListener("change", () => { state.grid.size = Math.max(8, Number(dom.gridSizeInput.value || 32)); dom.gridSizeInput.value = String(Math.round(state.grid.size)); requestRender(); });
+    dom.gridSizeInput.addEventListener("change", () => { state.grid.size = Math.max(8, Number(dom.gridSizeInput.value || 1000)); dom.gridSizeInput.value = String(Math.round(state.grid.size)); requestRender(); });
 
     dom.layerBackgroundChk.addEventListener("change", () => { state.layerVisibility.background = dom.layerBackgroundChk.checked; requestRender(); });
     dom.layerTerrainChk.addEventListener("change", () => { state.layerVisibility.terrain = dom.layerTerrainChk.checked; requestRender(); });
@@ -1510,13 +1966,44 @@
       const reader = new FileReader();
       reader.onload = () => {
         pushHistory("Import background image");
-        state.map.backgroundImage = { src: String(reader.result || ""), opacity: clamp(Number(dom.backgroundOpacityInput.value || 0.5), 0, 1), scale: clamp(Number(dom.backgroundScaleInput.value || 1), 0.2, 3), offsetX: Number(dom.backgroundOffsetXInput.value || 0), offsetY: Number(dom.backgroundOffsetYInput.value || 0) };
+        state.map.backgroundImage = {
+          src: String(reader.result || ""),
+          opacity: clamp(Number(dom.backgroundOpacityInput.value || dom.backgroundOpacityNumberInput.value || 0.5), 0, 1),
+          scale: clamp(Number(dom.backgroundScaleInput.value || 1), 0.2, 10),
+          offsetX: Number(dom.backgroundOffsetXInput.value || 0),
+          offsetY: Number(dom.backgroundOffsetYInput.value || 0)
+        };
         syncBackgroundControls();
         requestRender();
         setStatus("Background image imported.", "success");
       };
       reader.readAsDataURL(file);
       dom.importBackgroundInput.value = "";
+    });
+
+    dom.importBackgroundTileBtn.addEventListener("click", () => dom.importBackgroundTileInput.click());
+    dom.importBackgroundTileInput.addEventListener("change", (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      if (!file.type || !file.type.startsWith("image/")) {
+        setStatus("Tile import only supports PNG/JPG.", "error");
+        dom.importBackgroundTileInput.value = "";
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        pushHistory("Import background tile");
+        state.map.backgroundTile = {
+          src: String(reader.result || ""),
+          size: clamp(Math.round(Number(dom.backgroundTileSizeInput.value || 512)), 16, 10000),
+          opacity: clamp(Number(dom.backgroundTileOpacityInput.value || dom.backgroundTileOpacityNumberInput.value || 1), 0, 1)
+        };
+        syncBackgroundControls();
+        requestRender();
+        setStatus("Background tile imported.", "success");
+      };
+      reader.readAsDataURL(file);
+      dom.importBackgroundTileInput.value = "";
     });
 
     dom.clearBackgroundBtn.addEventListener("click", () => {
@@ -1528,20 +2015,65 @@
       setStatus("Background image removed.", "success");
     });
 
+    dom.clearBackgroundTileBtn.addEventListener("click", () => {
+      if (!state.map.backgroundTile) return;
+      pushHistory("Clear background tile");
+      state.map.backgroundTile = null;
+      syncBackgroundControls();
+      requestRender();
+      setStatus("Background tile removed.", "success");
+    });
+
     const updateBackground = () => {
       if (!state.map.backgroundImage) state.map.backgroundImage = createDefaultBackgroundImage();
-      state.map.backgroundImage.opacity = clamp(Number(dom.backgroundOpacityInput.value || 0.5), 0, 1);
-      state.map.backgroundImage.scale = clamp(Number(dom.backgroundScaleInput.value || 1), 0.2, 3);
+      const safeOpacity = clamp(Number(dom.backgroundOpacityInput.value || dom.backgroundOpacityNumberInput.value || 0.5), 0, 1);
+      dom.backgroundOpacityInput.value = String(safeOpacity);
+      dom.backgroundOpacityNumberInput.value = String(safeOpacity);
+      state.map.backgroundImage.opacity = safeOpacity;
+      state.map.backgroundImage.scale = clamp(Number(dom.backgroundScaleInput.value || 1), 0.2, 10);
       state.map.backgroundImage.offsetX = Number(dom.backgroundOffsetXInput.value || 0);
       state.map.backgroundImage.offsetY = Number(dom.backgroundOffsetYInput.value || 0);
       syncBackgroundControls();
       requestRender();
     };
 
+    const updateBackgroundTile = () => {
+      const safeSize = clamp(Math.round(Number(dom.backgroundTileSizeInput.value || 512)), 16, 10000);
+      dom.backgroundTileSizeInput.value = String(safeSize);
+      if (state.map.backgroundTile && state.map.backgroundTile.src) {
+        state.map.backgroundTile.size = safeSize;
+      }
+      requestRender();
+    };
+
+    const updateBackgroundTileOpacity = () => {
+      const safeOpacity = clamp(Number(dom.backgroundTileOpacityInput.value || dom.backgroundTileOpacityNumberInput.value || 1), 0, 1);
+      dom.backgroundTileOpacityInput.value = String(safeOpacity);
+      dom.backgroundTileOpacityNumberInput.value = String(safeOpacity);
+      if (!state.map.backgroundTile) state.map.backgroundTile = createDefaultBackgroundTile();
+      state.map.backgroundTile.opacity = safeOpacity;
+      syncBackgroundControls();
+      requestRender();
+    };
+
+    const updateBackgroundBaseColor = () => {
+      state.map.backgroundBaseColor = normalizeBackgroundBaseColor(dom.backgroundBaseColorInput.value, getTheme(state.map.theme).mapFill);
+      dom.backgroundBaseColorInput.value = state.map.backgroundBaseColor;
+      requestRender();
+    };
+
+    dom.backgroundBaseColorInput.addEventListener("input", updateBackgroundBaseColor);
     dom.backgroundOpacityInput.addEventListener("input", updateBackground);
+    dom.backgroundOpacityNumberInput.addEventListener("input", updateBackground);
+    dom.backgroundOpacityNumberInput.addEventListener("change", updateBackground);
     dom.backgroundScaleInput.addEventListener("input", updateBackground);
     dom.backgroundOffsetXInput.addEventListener("change", updateBackground);
     dom.backgroundOffsetYInput.addEventListener("change", updateBackground);
+    dom.backgroundTileOpacityInput.addEventListener("input", updateBackgroundTileOpacity);
+    dom.backgroundTileOpacityNumberInput.addEventListener("input", updateBackgroundTileOpacity);
+    dom.backgroundTileOpacityNumberInput.addEventListener("change", updateBackgroundTileOpacity);
+    dom.backgroundTileSizeInput.addEventListener("input", updateBackgroundTile);
+    dom.backgroundTileSizeInput.addEventListener("change", updateBackgroundTile);
 
     dom.clearPlayAreaBtn.addEventListener("click", () => {
       if (!state.map.playAreaMask.length) return;
@@ -1563,6 +2095,17 @@
 
   function wireKeyboard() {
     window.addEventListener("keydown", (event) => {
+      if (isMovementKey(event.code)) {
+        setMovementKeyState(event.code, true);
+        if (state.testMode.active) event.preventDefault();
+      }
+      if (state.testMode.active) {
+        if (event.code === "Escape") {
+          event.preventDefault();
+          stopTestMode();
+        }
+        return;
+      }
       if (event.code === "Space") state.keyboard.space = true;
       if (event.code === "Delete") deleteSelection();
       if ((event.ctrlKey || event.metaKey) && event.code === "KeyD") {
@@ -1590,6 +2133,8 @@
       }
     });
     window.addEventListener("keyup", (event) => {
+      if (isMovementKey(event.code)) setMovementKeyState(event.code, false);
+      if (state.testMode.active) return;
       if (event.code === "Space") state.keyboard.space = false;
     });
   }
@@ -1600,23 +2145,32 @@
     dom.canvas.addEventListener("wheel", (event) => {
       event.preventDefault();
       const point = getCanvasPointFromEvent(event);
-      const before = screenToWorld(point);
       const zoomFactor = event.deltaY < 0 ? 1.08 : 1 / 1.08;
-      state.camera.zoom = clamp(state.camera.zoom * zoomFactor, 0.2, 3.5);
-      const after = screenToWorld(point);
-      state.camera.x += before.x - after.x;
-      state.camera.y += before.y - after.y;
-      requestRender();
+      stepCameraZoom(zoomFactor, point);
     });
 
     dom.canvas.addEventListener("mousedown", (event) => {
       const canvasPoint = getCanvasPointFromEvent(event);
       const worldPoint = screenToWorld(canvasPoint);
       state.hoverWorld = worldPoint;
+      if (state.testMode.active) {
+        requestRender();
+        return;
+      }
 
       const shouldPan = event.button === 1 || (event.button === 0 && state.keyboard.space);
       if (shouldPan) {
         state.drag = { mode: "pan", startScreen: canvasPoint, cameraStart: { x: state.camera.x, y: state.camera.y } };
+        return;
+      }
+
+      if (event.button === 2) {
+        state.drag = {
+          mode: "pan_candidate",
+          startScreen: canvasPoint,
+          cameraStart: { x: state.camera.x, y: state.camera.y },
+          startWorld: worldPoint
+        };
         return;
       }
 
@@ -1656,6 +2210,18 @@
       const worldPoint = screenToWorld(canvasPoint);
       state.hoverWorld = worldPoint;
 
+      if (state.drag && state.drag.mode === "pan_candidate") {
+        const dx = canvasPoint.x - state.drag.startScreen.x;
+        const dy = canvasPoint.y - state.drag.startScreen.y;
+        if (Math.hypot(dx, dy) >= 6) {
+          state.drag.mode = "pan";
+          state.camera.x = state.drag.cameraStart.x - dx / state.camera.zoom;
+          state.camera.y = state.drag.cameraStart.y - dy / state.camera.zoom;
+          requestRender();
+        }
+        return;
+      }
+
       if (state.drag && state.drag.mode === "pan") {
         const dx = canvasPoint.x - state.drag.startScreen.x;
         const dy = canvasPoint.y - state.drag.startScreen.y;
@@ -1691,10 +2257,20 @@
     });
 
     window.addEventListener("mouseup", () => {
+      if (state.drag && state.drag.mode === "pan_candidate" && shouldStartSecondaryStroke(state.tool)) {
+        startStroke(state.tool, state.drag.startWorld, 2);
+        finishStroke();
+      }
       if (state.drag && state.drag.mode !== "pan") setStatus("Selection updated.", "success");
       state.drag = null;
       finishStroke();
     });
+  }
+
+  function wireZoomControls() {
+    if (dom.zoomOutBtn) dom.zoomOutBtn.addEventListener("click", () => stepCameraZoom(1 / 1.15, getCanvasCenterPoint()));
+    if (dom.zoomInBtn) dom.zoomInBtn.addEventListener("click", () => stepCameraZoom(1.15, getCanvasCenterPoint()));
+    if (dom.zoomResetBtn) dom.zoomResetBtn.addEventListener("click", resetCameraZoom);
   }
 
   function bootstrapSelects() {
@@ -1743,6 +2319,7 @@
     wireToolInputs();
     wireKeyboard();
     wireCanvas();
+    wireZoomControls();
     state.map = createDefaultMap(state.activeLevelId);
     await loadLevelSlot(state.activeLevelId);
     refreshLocalMapSelect();

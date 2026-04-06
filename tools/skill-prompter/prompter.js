@@ -102,22 +102,27 @@
       consistencyTags: ["neutral utility style", "high readability", "metal-centric visual language"]
     })
   });
+  const BUILT_IN_SCOPE_PROMPTS = Object.freeze({
+    weapon:
+      "weapon-skill icon treatment, clear focal point, stylized energy trails, controlled particle accents, small-size readability"
+  });
+  const BUILT_IN_SCOPE_STYLE_TAGS = Object.freeze({
+    class: Object.freeze([]),
+    weapon: Object.freeze(["weapon", "fx", "clarity"])
+  });
 
   const state = {
-    templates: [],
-    selectedTemplateId: "",
-    templateFilterCategory: "all",
+    classFlavorProfiles: [],
     builder: {
-      globalTemplateId: "",
       globalRules: "",
       globalExclusions: "",
       globalArtistInfluence: "",
       subjectImageReference: "",
       subjectPaletteSwatches: [],
       subject: "",
+      classTheme: "",
       colorTheme: "",
       classExclusions: "",
-      classRulesTemplateScope: "class",
       classFlavorId: "barbarian",
       classFlavor: "barbarian",
       classPaletteByClass: {},
@@ -149,13 +154,8 @@
   function init() {
     cacheDom();
     hydrateState();
-    initializeTemplateLibraryAccordion();
     initializeSkillEntryAccordion();
     bindEvents();
-    renderTemplateFilterOptions();
-    renderTemplateList();
-    syncTemplateEditor();
-    renderGlobalTemplateSelect();
     renderClassFlavorOptions();
     syncBuilderInputs();
     updateFinalPromptOutput();
@@ -166,29 +166,13 @@
   }
 
   function cacheDom() {
-    dom.templateLibraryPanel = byId("templateLibraryPanel");
-    dom.templateLibraryHeader = byId("templateLibraryHeader");
-    dom.templateLibraryContent = byId("templateLibraryContent");
-    dom.templateLibraryChevron = byId("templateLibraryChevron");
     dom.skillEntryPanel = byId("skillEntryPanel");
     dom.skillEntryHeader = byId("skillEntryHeader");
     dom.skillEntryContent = byId("skillEntryContent");
     dom.skillEntryChevron = byId("skillEntryChevron");
-    dom.templateFilterCategory = byId("templateFilterCategory");
-    dom.templateList = byId("templateList");
-    dom.newTemplateBtn = byId("newTemplateBtn");
-    dom.duplicateTemplateBtn = byId("duplicateTemplateBtn");
-    dom.deleteTemplateBtn = byId("deleteTemplateBtn");
-    dom.templateNameInput = byId("templateNameInput");
-    dom.templateCategoryInput = byId("templateCategoryInput");
-    dom.templateTagsInput = byId("templateTagsInput");
-    dom.templatePromptInput = byId("templatePromptInput");
-
-    dom.globalTemplateSelect = byId("globalTemplateSelect");
     dom.globalRulesInput = byId("globalRulesInput");
     dom.globalExclusionsInput = byId("globalExclusionsInput");
     dom.globalArtistInfluenceInput = byId("globalArtistInfluenceInput");
-    dom.classRulesTemplateScopeSelect = byId("classRulesTemplateScopeSelect");
     dom.globalOutputSizeSelect = byId("globalOutputSizeSelect");
     dom.globalAspectRatioSelect = byId("globalAspectRatioSelect");
     dom.enforceGlobalOutputStandardCheckbox = byId("enforceGlobalOutputStandardCheckbox");
@@ -200,10 +184,14 @@
     dom.addSubjectPaletteSwatchBtn = byId("addSubjectPaletteSwatchBtn");
     dom.clearSubjectPaletteBtn = byId("clearSubjectPaletteBtn");
     dom.subjectInput = byId("subjectInput");
+    dom.classThemeInput = byId("classThemeInput");
     dom.modifierColorInput = byId("modifierColorInput");
     dom.classExclusionsInput = byId("classExclusionsInput");
     dom.classFlavorSelect = byId("classFlavorSelect");
-    dom.classFlavorHint = byId("classFlavorHint");
+    dom.classFlavorNameInput = byId("classFlavorNameInput");
+    dom.renameClassFlavorBtn = byId("renameClassFlavorBtn");
+    dom.newClassFlavorBtn = byId("newClassFlavorBtn");
+    dom.classFlavorStatus = byId("classFlavorStatus");
     dom.classPaletteSwatches = byId("classPaletteSwatches");
     dom.classPaletteHexInput = byId("classPaletteHexInput");
     dom.classPaletteColorInput = byId("classPaletteColorInput");
@@ -235,11 +223,9 @@
     dom.skillList = byId("skillList");
     dom.skillNameInput = byId("skillNameInput");
     dom.skillClassInput = byId("skillClassInput");
-    dom.skillCategoryInput = byId("skillCategoryInput");
     dom.skillTierSelect = byId("skillTierSelect");
     dom.skillFolderPathInput = byId("skillFolderPathInput");
     dom.suggestPathBtn = byId("suggestPathBtn");
-    dom.skillTagsInput = byId("skillTagsInput");
     dom.skillVersionSelect = byId("skillVersionSelect");
     dom.newVersionBtn = byId("newVersionBtn");
     dom.duplicateVersionBtn = byId("duplicateVersionBtn");
@@ -255,39 +241,9 @@
   }
 
   function bindEvents() {
-    if (dom.templateLibraryHeader) {
-      dom.templateLibraryHeader.addEventListener("click", onTemplateLibraryHeaderClick);
-      dom.templateLibraryHeader.addEventListener("keydown", onTemplateLibraryHeaderKeyDown);
-    }
     if (dom.skillEntryHeader) {
       dom.skillEntryHeader.addEventListener("click", onSkillEntryHeaderClick);
       dom.skillEntryHeader.addEventListener("keydown", onSkillEntryHeaderKeyDown);
-    }
-
-    dom.templateFilterCategory.addEventListener("change", () => {
-      state.templateFilterCategory = String(dom.templateFilterCategory.value || "all");
-      renderTemplateList();
-      saveState();
-    });
-
-    dom.newTemplateBtn.addEventListener("click", createTemplate);
-    dom.duplicateTemplateBtn.addEventListener("click", duplicateTemplate);
-    dom.deleteTemplateBtn.addEventListener("click", deleteTemplate);
-
-    dom.templateNameInput.addEventListener("input", () => updateTemplateField("name", dom.templateNameInput.value));
-    dom.templateCategoryInput.addEventListener("input", () => updateTemplateField("category", dom.templateCategoryInput.value));
-    dom.templateTagsInput.addEventListener("input", () => updateTemplateField("tags", parseTagString(dom.templateTagsInput.value)));
-    dom.templatePromptInput.addEventListener("input", () => updateTemplateField("prompt", dom.templatePromptInput.value));
-
-    if (dom.globalTemplateSelect) {
-      dom.globalTemplateSelect.addEventListener("change", () => {
-        state.builder.globalTemplateId = String(dom.globalTemplateSelect.value || "");
-        updateFinalPromptOutput();
-        saveState();
-      });
-    }
-    if (dom.classRulesTemplateScopeSelect) {
-      dom.classRulesTemplateScopeSelect.addEventListener("change", onClassRulesTemplateScopeChange);
     }
     dom.globalRulesInput.addEventListener("input", onBuilderFieldChange);
     dom.globalExclusionsInput.addEventListener("input", onBuilderFieldChange);
@@ -302,10 +258,20 @@
     dom.addSubjectPaletteSwatchBtn.addEventListener("click", addSubjectPaletteSwatchFromInputs);
     dom.clearSubjectPaletteBtn.addEventListener("click", clearSubjectPaletteSwatches);
     dom.subjectInput.addEventListener("input", onBuilderFieldChange);
+    dom.classThemeInput.addEventListener("input", onBuilderFieldChange);
     dom.modifierColorInput.addEventListener("input", onBuilderFieldChange);
     dom.classExclusionsInput.addEventListener("input", onBuilderFieldChange);
     if (dom.classFlavorSelect) {
       dom.classFlavorSelect.addEventListener("change", onClassFlavorChange);
+    }
+    if (dom.classFlavorNameInput) {
+      dom.classFlavorNameInput.addEventListener("keydown", onClassFlavorNameInputKeyDown);
+    }
+    if (dom.renameClassFlavorBtn) {
+      dom.renameClassFlavorBtn.addEventListener("click", renameSelectedClassFlavor);
+    }
+    if (dom.newClassFlavorBtn) {
+      dom.newClassFlavorBtn.addEventListener("click", createNewClassFlavorFromCurrent);
     }
     dom.classPaletteHexInput.addEventListener("input", onClassPaletteHexInputChange);
     dom.classPaletteColorInput.addEventListener("input", onClassPaletteColorInputChange);
@@ -344,11 +310,9 @@
       dom.loadPromptConfigVersionBtn.addEventListener("click", loadSelectedPromptConfigVersion);
     }
     dom.skillNameInput.addEventListener("input", () => updateSkillField("skillName", dom.skillNameInput.value));
-    dom.skillClassInput.addEventListener("input", () => updateSkillField("className", dom.skillClassInput.value));
-    dom.skillCategoryInput.addEventListener("input", () => updateSkillField("category", dom.skillCategoryInput.value));
+    dom.skillClassInput.addEventListener("change", () => updateSkillField("className", dom.skillClassInput.value));
     dom.skillTierSelect.addEventListener("change", () => updateSkillField("skillTier", dom.skillTierSelect.value));
     dom.skillFolderPathInput.addEventListener("input", () => updateSkillField("folderPath", dom.skillFolderPathInput.value));
-    dom.skillTagsInput.addEventListener("input", () => updateSkillField("tags", parseTagString(dom.skillTagsInput.value)));
     dom.suggestPathBtn.addEventListener("click", suggestPathForActiveSkill);
     dom.skillVersionSelect.addEventListener("change", () => {
       const entry = getSelectedSkillEntry();
@@ -372,15 +336,8 @@
     const savedRaw = loadJson(STORAGE_KEY);
     const saved = normalizeSavedState(savedRaw);
 
-    state.templates = mergeTemplates(defaults.templates, saved.templates);
-    state.selectedTemplateId = pickExistingId(saved.selectedTemplateId, state.templates) || defaults.selectedTemplateId;
-    state.templateFilterCategory = String(saved.templateFilterCategory || "all");
-
+    state.classFlavorProfiles = normalizeSavedClassFlavorProfiles(saved.classFlavorProfiles);
     state.builder = {
-      globalTemplateId:
-        pickExistingId(saved.builder && saved.builder.globalTemplateId, state.templates) ||
-        pickExistingId(defaults.builder.globalTemplateId, state.templates) ||
-        "",
       subject: String(saved.builder && saved.builder.subject || defaults.builder.subject || ""),
       subjectImageReference: String(
         saved.builder && saved.builder.subjectImageReference || defaults.builder.subjectImageReference || ""
@@ -393,12 +350,9 @@
       globalArtistInfluence: String(
         saved.builder && saved.builder.globalArtistInfluence || defaults.builder.globalArtistInfluence || ""
       ),
+      classTheme: String(saved.builder && saved.builder.classTheme || defaults.builder.classTheme || ""),
       colorTheme: String(saved.builder && saved.builder.colorTheme || defaults.builder.colorTheme || ""),
       classExclusions: String(saved.builder && saved.builder.classExclusions || defaults.builder.classExclusions || ""),
-      classRulesTemplateScope: normalizeClassRulesTemplateScope(
-        saved.builder && saved.builder.classRulesTemplateScope,
-        defaults.builder.classRulesTemplateScope
-      ),
       classFlavorId: resolveClassFlavorId(
         saved.builder && (saved.builder.classFlavorId || saved.builder.classFlavor) ||
           defaults.builder.classFlavorId ||
@@ -439,22 +393,19 @@
   }
 
   function createDefaultState() {
-    const templates = createDefaultTemplates();
     const skills = buildDefaultSkillEntries();
     return {
-      templates,
-      selectedTemplateId: templates.length ? templates[0].id : "",
+      classFlavorProfiles: [],
       builder: {
-        globalTemplateId: templates.length ? templates[0].id : "",
         globalRules: "",
         globalExclusions: "",
         globalArtistInfluence: "",
         subjectImageReference: "",
       subjectPaletteSwatches: [],
       subject: "",
+      classTheme: "",
       colorTheme: "",
       classExclusions: "",
-      classRulesTemplateScope: "class",
       classFlavorId: "barbarian",
       classFlavor: "barbarian",
       classPaletteByClass: createDefaultClassPaletteByClass(),
@@ -469,35 +420,6 @@
       promptLinkSkillSearchTerm: "",
       promptLinkSkillId: skills.length ? skills[0].id : ""
     };
-  }
-
-  function createDefaultTemplates() {
-    return [
-      {
-        id: makeId("tpl"),
-        name: "Global Dark Fantasy Icon",
-        category: "Global",
-        prompt:
-          "top-down fantasy skill icon, dramatic lighting, high contrast silhouette readability, painterly texture, centered composition, no text, square icon, transparent or dark neutral background",
-        tags: ["icon", "top-down", "dark fantasy", "readable"]
-      },
-      {
-        id: makeId("tpl"),
-        name: "Class Flavor - Barbarian",
-        category: "Class",
-        prompt:
-          "barbarian class flavor, primal aggression, heavy impact energy, thick bold shapes, rugged materials, battle-worn style",
-        tags: ["barbarian", "class flavor", "impact"]
-      },
-      {
-        id: makeId("tpl"),
-        name: "Weapon FX Accent",
-        category: "Weapon",
-        prompt:
-          "weapon-skill icon treatment, clear focal point, stylized energy trails, controlled particle accents, small-size readability",
-        tags: ["weapon", "fx", "clarity"]
-      }
-    ];
   }
 
   function buildDefaultSkillEntries() {
@@ -610,19 +532,6 @@
   function normalizeSavedState(saved) {
     if (!saved || typeof saved !== "object") return {};
     return saved;
-  }
-
-  function mergeTemplates(defaults, saved) {
-    const base = Array.isArray(saved) && saved.length ? saved : defaults;
-    return base
-      .map((tpl) => ({
-        id: String(tpl && tpl.id || makeId("tpl")),
-        name: String(tpl && tpl.name || "Template"),
-        category: String(tpl && tpl.category || "Global"),
-        prompt: String(tpl && tpl.prompt || ""),
-        tags: Array.isArray(tpl && tpl.tags) ? tpl.tags.map(String) : []
-      }))
-      .filter((tpl) => tpl.id);
   }
 
   function mergeSkills(defaults, saved) {
@@ -767,168 +676,6 @@
     };
   }
 
-  function renderTemplateFilterOptions() {
-    const categories = ["all"];
-    state.templates.forEach((tpl) => {
-      const category = String(tpl.category || "").trim();
-      if (!category) return;
-      if (!categories.includes(category)) categories.push(category);
-    });
-    categories.sort((a, b) => a.localeCompare(b));
-    dom.templateFilterCategory.innerHTML = "";
-    categories.forEach((category) => {
-      const option = document.createElement("option");
-      option.value = category;
-      option.textContent = category === "all" ? "All" : category;
-      dom.templateFilterCategory.appendChild(option);
-    });
-    if (!categories.includes(state.templateFilterCategory)) {
-      state.templateFilterCategory = "all";
-    }
-    dom.templateFilterCategory.value = state.templateFilterCategory;
-  }
-
-  function renderTemplateList() {
-    renderTemplateFilterOptions();
-    dom.templateList.innerHTML = "";
-    const fragment = document.createDocumentFragment();
-    getFilteredTemplates().forEach((tpl) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = `template-item${tpl.id === state.selectedTemplateId ? " active" : ""}`;
-      button.addEventListener("click", () => {
-        state.selectedTemplateId = tpl.id;
-        syncTemplateEditor();
-        renderTemplateList();
-        saveState();
-      });
-
-      const main = document.createElement("div");
-      main.className = "template-item-main";
-      const name = document.createElement("div");
-      name.className = "template-name";
-      name.textContent = tpl.name;
-      const meta = document.createElement("div");
-      meta.className = "template-meta";
-      meta.textContent = tpl.category || "Uncategorized";
-      main.append(name, meta);
-      button.appendChild(main);
-
-      fragment.appendChild(button);
-    });
-    dom.templateList.appendChild(fragment);
-    syncTemplateEditor();
-  }
-
-  function getFilteredTemplates() {
-    if (state.templateFilterCategory === "all") return state.templates.slice();
-    return state.templates.filter((tpl) => String(tpl.category || "").trim() === state.templateFilterCategory);
-  }
-
-  function syncTemplateEditor() {
-    const template = getSelectedTemplate();
-    dom.templateNameInput.value = template ? template.name : "";
-    dom.templateCategoryInput.value = template ? template.category : "";
-    dom.templateTagsInput.value = template ? joinTags(template.tags) : "";
-    dom.templatePromptInput.value = template ? template.prompt : "";
-    renderGlobalTemplateSelect();
-  }
-
-  function getSelectedTemplate() {
-    return state.templates.find((tpl) => tpl.id === state.selectedTemplateId) || null;
-  }
-
-  function createTemplate() {
-    const created = {
-      id: makeId("tpl"),
-      name: "New Template",
-      category: "Global",
-      prompt: "",
-      tags: []
-    };
-    state.templates.unshift(created);
-    state.selectedTemplateId = created.id;
-    renderTemplateList();
-    syncTemplateEditor();
-    renderGlobalTemplateSelect();
-    saveState();
-  }
-
-  function duplicateTemplate() {
-    const template = getSelectedTemplate();
-    if (!template) return;
-    const duplicate = {
-      id: makeId("tpl"),
-      name: `${template.name} Copy`,
-      category: template.category,
-      prompt: template.prompt,
-      tags: template.tags.slice()
-    };
-    const index = state.templates.findIndex((tpl) => tpl.id === template.id);
-    if (index >= 0) state.templates.splice(index + 1, 0, duplicate);
-    else state.templates.push(duplicate);
-    state.selectedTemplateId = duplicate.id;
-    renderTemplateList();
-    syncTemplateEditor();
-    renderGlobalTemplateSelect();
-    saveState();
-  }
-
-  function deleteTemplate() {
-    const template = getSelectedTemplate();
-    if (!template) return;
-    if (state.templates.length <= 1) return;
-    state.templates = state.templates.filter((tpl) => tpl.id !== template.id);
-    state.selectedTemplateId = state.templates.length ? state.templates[0].id : "";
-    if (state.builder.globalTemplateId === template.id) {
-      state.builder.globalTemplateId = state.selectedTemplateId;
-    }
-    renderTemplateList();
-    syncTemplateEditor();
-    renderGlobalTemplateSelect();
-    updateFinalPromptOutput();
-    saveState();
-  }
-
-  function updateTemplateField(field, value) {
-    const template = getSelectedTemplate();
-    if (!template) return;
-    if (field === "tags") {
-      template.tags = Array.isArray(value) ? value : [];
-    } else {
-      template[field] = String(value || "");
-    }
-    if (field === "category") renderTemplateFilterOptions();
-    renderTemplateList();
-    renderGlobalTemplateSelect();
-    updateFinalPromptOutput();
-    saveState();
-  }
-
-  function renderGlobalTemplateSelect() {
-    const current = state.builder.globalTemplateId;
-    const scope = normalizeClassRulesTemplateScope(state.builder.classRulesTemplateScope, "class");
-    const scopedTemplates = getTemplatesForClassRulesScope(scope);
-    if (!pickExistingId(current, scopedTemplates) && scopedTemplates.length) {
-      state.builder.globalTemplateId = scopedTemplates[0].id;
-    } else if (!scopedTemplates.length) {
-      state.builder.globalTemplateId = "";
-    }
-    if (!dom.globalTemplateSelect) return;
-    dom.globalTemplateSelect.innerHTML = "";
-    scopedTemplates.forEach((template) => {
-      const option = document.createElement("option");
-      option.value = template.id;
-      option.textContent = `${template.name} (${template.category || "Uncategorized"})`;
-      dom.globalTemplateSelect.appendChild(option);
-    });
-    if (pickExistingId(state.builder.globalTemplateId, scopedTemplates)) {
-      dom.globalTemplateSelect.value = state.builder.globalTemplateId || "";
-    } else if (scopedTemplates.length) {
-      dom.globalTemplateSelect.value = scopedTemplates[0].id;
-    }
-  }
-
   function renderClassFlavorOptions() {
     const profiles = getClassFlavorProfiles();
     const current = resolveClassFlavorId(state.builder.classFlavorId || state.builder.classFlavor);
@@ -945,22 +692,11 @@
       });
       dom.classFlavorSelect.value = state.builder.classFlavorId;
     }
-    updateClassFlavorHint();
+    syncClassFlavorNameInput();
     renderClassPaletteControls();
   }
 
   function syncBuilderInputs() {
-    state.builder.classRulesTemplateScope = normalizeClassRulesTemplateScope(
-      state.builder.classRulesTemplateScope,
-      "class"
-    );
-    if (dom.classRulesTemplateScopeSelect) {
-      dom.classRulesTemplateScopeSelect.value = state.builder.classRulesTemplateScope;
-    }
-    renderGlobalTemplateSelect();
-    if (dom.globalTemplateSelect) {
-      dom.globalTemplateSelect.value = state.builder.globalTemplateId || "";
-    }
     renderClassFlavorOptions();
     dom.globalRulesInput.value = state.builder.globalRules || "";
     dom.globalExclusionsInput.value = state.builder.globalExclusions || "";
@@ -971,19 +707,10 @@
     dom.subjectImageReferenceInput.value = state.builder.subjectImageReference || "";
     renderSubjectPaletteControls();
     dom.subjectInput.value = state.builder.subject || "";
+    dom.classThemeInput.value = state.builder.classTheme || "";
     dom.modifierColorInput.value = state.builder.colorTheme || "";
     dom.classExclusionsInput.value = state.builder.classExclusions || "";
     dom.modifierStyleTagsInput.value = state.builder.styleTags || "";
-  }
-
-  function onClassRulesTemplateScopeChange() {
-    state.builder.classRulesTemplateScope = normalizeClassRulesTemplateScope(
-      dom.classRulesTemplateScopeSelect ? dom.classRulesTemplateScopeSelect.value : state.builder.classRulesTemplateScope,
-      state.builder.classRulesTemplateScope
-    );
-    renderGlobalTemplateSelect();
-    updateFinalPromptOutput();
-    saveState();
   }
 
   function onBuilderFieldChange() {
@@ -998,6 +725,7 @@
     state.builder.outputStandardizationEnabled = Boolean(dom.enforceGlobalOutputStandardCheckbox.checked);
     state.builder.subjectImageReference = String(dom.subjectImageReferenceInput.value || "").trim();
     state.builder.subject = String(dom.subjectInput.value || "");
+    state.builder.classTheme = String(dom.classThemeInput.value || "");
     state.builder.colorTheme = String(dom.modifierColorInput.value || "");
     state.builder.classExclusions = String(dom.classExclusionsInput.value || "");
     state.builder.styleTags = String(dom.modifierStyleTagsInput.value || "");
@@ -1154,10 +882,70 @@
     state.builder.classFlavor = state.builder.classFlavorId;
     ensureClassPaletteFor(state.builder.classFlavorId);
     setSelectedClassPaletteSwatchIndex(-1);
-    updateClassFlavorHint();
+    syncClassFlavorNameInput();
+    renderPromptLinkSkillOptions();
     renderClassPaletteControls();
     updateFinalPromptOutput();
     saveState();
+  }
+
+  function onClassFlavorNameInputKeyDown(event) {
+    const key = String(event && event.key || "");
+    if (key !== "Enter") return;
+    event.preventDefault();
+    renameSelectedClassFlavor();
+  }
+
+  function renameSelectedClassFlavor() {
+    const profile = getSelectedClassFlavorProfile();
+    const nextLabel = String(dom.classFlavorNameInput && dom.classFlavorNameInput.value || "").trim();
+    if (!profile || !nextLabel) {
+      setClassFlavorStatus("Enter a class type name before renaming.");
+      return;
+    }
+    upsertClassFlavorProfile({
+      id: profile.id,
+      label: nextLabel,
+      parentPrompt: profile.parentPrompt,
+      defaultColorTheme: profile.defaultColorTheme,
+      defaultPalette: profile.defaultPalette,
+      consistencyTags: profile.consistencyTags,
+      isCustom: !Object.prototype.hasOwnProperty.call(BASE_CLASS_FLAVOR_PROFILES, profile.id)
+    });
+    renderClassFlavorOptions();
+    syncSkillEditor();
+    renderSkillList();
+    updateFinalPromptOutput();
+    saveState();
+    setClassFlavorStatus(`Renamed class type to ${nextLabel}.`);
+  }
+
+  function createNewClassFlavorFromCurrent() {
+    const sourceProfile = getSelectedClassFlavorProfile();
+    const nextLabel = String(dom.classFlavorNameInput && dom.classFlavorNameInput.value || "").trim() || "New Class";
+    const nextId = createUniqueClassFlavorId(nextLabel);
+    const activePalette = getActiveClassPalette();
+    upsertClassFlavorProfile({
+      id: nextId,
+      label: nextLabel,
+      parentPrompt: sourceProfile && sourceProfile.parentPrompt ? sourceProfile.parentPrompt : "",
+      defaultColorTheme: sourceProfile && sourceProfile.defaultColorTheme ? sourceProfile.defaultColorTheme : "",
+      defaultPalette: activePalette,
+      consistencyTags: sourceProfile && Array.isArray(sourceProfile.consistencyTags) ? sourceProfile.consistencyTags.slice() : [],
+      isCustom: true
+    });
+    state.builder.classFlavorId = nextId;
+    state.builder.classFlavor = nextId;
+    state.builder.classPaletteByClass[nextId] = normalizePaletteSwatches(activePalette);
+    state.classPaletteUndoStackByClass[nextId] = [];
+    state.selectedClassPaletteSwatchIndexByClass[nextId] = -1;
+    renderClassFlavorOptions();
+    syncSkillEditor();
+    renderSkillList();
+    renderPromptLinkSkillOptions();
+    updateFinalPromptOutput();
+    saveState();
+    setClassFlavorStatus(`Created class type ${nextLabel}.`);
   }
 
   function onClassPaletteHexInputChange() {
@@ -1373,7 +1161,8 @@
   }
 
   function updateFinalPromptOutput() {
-    const template = state.templates.find((tpl) => tpl.id === state.builder.globalTemplateId) || null;
+    const scope = inferClassRulesTemplateScope();
+    const scopePrompt = getBuiltInScopePrompt(scope);
     const classProfile = getSelectedClassFlavorProfile();
     const activePalette = getActiveClassPalette();
     const paletteInfluence = clampPaletteInfluence(state.builder.paletteInfluencePct, 60);
@@ -1393,8 +1182,8 @@
       globalRulesParts.push(`standardized aspect ratio: ${outputAspectRatio}`);
     }
 
-    if (template && template.prompt.trim()) classRulesParts.push(template.prompt.trim());
-    if (classProfile.parentPrompt.trim()) classRulesParts.push(classProfile.parentPrompt.trim());
+    if (scopePrompt) classRulesParts.push(scopePrompt);
+    if (state.builder.classTheme.trim()) classRulesParts.push(`theme notes: ${state.builder.classTheme.trim()}`);
     const resolvedColorTheme = state.builder.colorTheme.trim() || classProfile.defaultColorTheme.trim();
     if (resolvedColorTheme) classRulesParts.push(`color theme: ${resolvedColorTheme}`);
     if (state.builder.classExclusions.trim()) classRulesParts.push(`exclude: ${state.builder.classExclusions.trim()}`);
@@ -1417,8 +1206,7 @@
 
     const styleTags = dedupe(
       []
-        .concat(template && Array.isArray(template.tags) ? template.tags : [])
-        .concat(Array.isArray(classProfile.consistencyTags) ? classProfile.consistencyTags : [])
+        .concat(getBuiltInScopeStyleTags(scope))
         .concat(parseTagString(state.builder.styleTags || ""))
     );
     if (styleTags.length) globalRulesParts.push(`style tags: ${styleTags.join(", ")}`);
@@ -1488,8 +1276,9 @@
 
   function getPromptLinkVisibleSkills() {
     const query = String(state.promptLinkSkillSearchTerm || "").trim().toLowerCase();
-    if (!query) return state.skills.slice();
-    return state.skills.filter((entry) => {
+    const classFilteredSkills = getPromptLinkSkillsForSelectedClass();
+    if (!query) return classFilteredSkills;
+    return classFilteredSkills.filter((entry) => {
       const haystack = [
         entry.skillName,
         entry.id,
@@ -1500,6 +1289,24 @@
       ].join(" ").toLowerCase();
       return haystack.includes(query);
     });
+  }
+
+  function getPromptLinkSkillsForSelectedClass() {
+    const selectedClassId = resolveClassFlavorId(state.builder.classFlavorId || state.builder.classFlavor);
+    return state.skills.filter((entry) => doesSkillMatchPromptLinkClass(entry, selectedClassId));
+  }
+
+  function doesSkillMatchPromptLinkClass(entry, classId) {
+    if (!entry || typeof entry !== "object") return false;
+    const resolvedClassId = resolveClassFlavorId(classId);
+    const scope = String(entry.scope || "").trim().toLowerCase();
+    if (resolvedClassId === "weapon") {
+      return scope === "weapon";
+    }
+    const entryClassId =
+      findMatchingClassFlavorId(entry.className || "") ||
+      findMatchingClassFlavorId(entry.classFlavorId || "");
+    return scope === "class" && entryClassId === resolvedClassId;
   }
 
   function renderPromptLinkSkillOptions() {
@@ -1513,9 +1320,10 @@
     if (!visibleSkills.length) {
       const option = document.createElement("option");
       option.value = "";
-      option.textContent = "No matching skills";
+      option.textContent = "No skills available for selected class";
       dom.promptLinkSkillSelect.appendChild(option);
       dom.promptLinkSkillSelect.value = "";
+      state.promptLinkSkillId = "";
       return;
     }
 
@@ -1545,7 +1353,6 @@
 
     state.selectedSkillId = entry.id;
     state.promptLinkSkillId = entry.id;
-    applyClassRulesForSkill(entry);
 
     const promptConfig = getActivePromptConfig(entry);
     if (promptConfig) {
@@ -1561,22 +1368,6 @@
       setPromptLinkStatus(`${entry.skillName} has no saved prompt settings yet. Subject rules reset.`);
       if (opts.focusBuilder) focusPromptBuilderForPreview();
     }
-  }
-
-  function applyClassRulesForSkill(entry) {
-    const nextClassFlavorId = deriveClassFlavorIdFromSkillEntry(entry);
-    state.builder.classFlavorId = nextClassFlavorId;
-    state.builder.classFlavor = nextClassFlavorId;
-    ensureClassPaletteFor(nextClassFlavorId);
-    renderClassFlavorOptions();
-  }
-
-  function deriveClassFlavorIdFromSkillEntry(entry) {
-    if (!entry || typeof entry !== "object") return resolveClassFlavorId(state.builder.classFlavorId || "barbarian");
-    if (String(entry.scope || "").toLowerCase() === "weapon") return "weapon";
-    const fromClassName = resolveClassFlavorId(entry.className || "");
-    if (fromClassName !== "none") return fromClassName;
-    return resolveClassFlavorId(state.builder.classFlavorId || "barbarian");
   }
 
   function clearSubjectRulesForSkillSelection() {
@@ -1654,9 +1445,6 @@
     if (!entry || !promptConfig) return;
     const opts = options && typeof options === "object" ? options : {};
 
-    state.builder.globalTemplateId = pickDefaultGlobalTemplateId();
-    applyClassRulesForSkill(entry);
-
     state.builder.subject = String(promptConfig.subjectDescription || "");
     state.builder.subjectImageReference = String(promptConfig.imageReference || "");
     state.builder.subjectPaletteSwatches = normalizePaletteSwatches(promptConfig.paletteOverride || []);
@@ -1674,16 +1462,6 @@
     renderSkillList();
     syncSkillEditor();
     if (opts.focusBuilder) focusPromptBuilderForPreview();
-  }
-
-  function pickDefaultGlobalTemplateId() {
-    const globals = state.templates.filter((template) => {
-      const category = String(template && template.category || "").trim().toLowerCase();
-      return category === "global";
-    });
-    if (globals.length) return globals[0].id;
-    if (state.templates.length) return state.templates[0].id;
-    return "";
   }
 
   function focusPromptBuilderForPreview() {
@@ -1795,7 +1573,7 @@
   }
 
   function getSkillGroupKey(entry) {
-    if (entry.scope === "class") return `Class - ${entry.className || "Unknown"}`;
+    if (entry.scope === "class") return `Class - ${getClassFlavorDisplayName(entry.className)}`;
     if (entry.scope === "weapon") return `Weapon - ${entry.weaponId || "Unknown"}`;
     return "General";
   }
@@ -1807,14 +1585,12 @@
   function syncSkillEditor() {
     const entry = getSelectedSkillEntry();
     const version = getActiveVersion(entry);
+    renderSkillClassOptions(entry ? entry.className : "");
 
     if (!entry) {
       dom.skillNameInput.value = "";
-      dom.skillClassInput.value = "";
-      dom.skillCategoryInput.value = "";
       dom.skillTierSelect.value = "normal";
       dom.skillFolderPathInput.value = "";
-      dom.skillTagsInput.value = "";
       dom.skillVersionSelect.innerHTML = "";
       dom.versionImagePathInput.value = "";
       if (dom.versionPaletteInfluenceInput) dom.versionPaletteInfluenceInput.value = String(clampPaletteInfluence(state.builder.paletteInfluencePct, 60));
@@ -1828,19 +1604,11 @@
     }
 
     dom.skillNameInput.value = entry.skillName || "";
-    dom.skillClassInput.value = entry.className || "";
-    dom.skillCategoryInput.value = entry.category || "";
     dom.skillTierSelect.value = getSkillTier(entry);
     dom.skillFolderPathInput.value = entry.folderPath || "";
-    dom.skillTagsInput.value = joinTags(entry.tags || []);
 
     renderVersionSelect(entry, version);
     dom.versionImagePathInput.value = version ? version.imagePath || "" : "";
-    if (version && version.classFlavorId) {
-      state.builder.classFlavorId = resolveClassFlavorId(version.classFlavorId);
-      state.builder.classFlavor = state.builder.classFlavorId;
-      renderClassFlavorOptions();
-    }
     const versionInfluence = clampPaletteInfluence(
       version ? version.paletteInfluencePct : state.builder.paletteInfluencePct,
       state.builder.paletteInfluencePct
@@ -2423,10 +2191,27 @@
 
   function getClassFlavorProfiles() {
     const orderedIds = ["barbarian", "ranger", "monk", "necromancer", "weapon"];
-    return orderedIds
+    const baseProfiles = orderedIds
       .map((id) => BASE_CLASS_FLAVOR_PROFILES[id])
       .filter(Boolean)
       .map((profile) => Object.assign({}, profile));
+    const overrides = Array.isArray(state.classFlavorProfiles) ? state.classFlavorProfiles : [];
+    const byId = new Map(baseProfiles.map((profile) => [profile.id, profile]));
+    const customProfiles = [];
+    overrides.forEach((profile) => {
+      if (!profile || !profile.id) return;
+      const normalized = normalizeClassFlavorProfile(profile);
+      if (!normalized) return;
+      if (byId.has(normalized.id)) {
+        byId.set(normalized.id, Object.assign({}, byId.get(normalized.id), normalized));
+      } else {
+        customProfiles.push(normalized);
+      }
+    });
+    return orderedIds
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+      .concat(customProfiles);
   }
 
   function createDefaultClassPaletteByClass() {
@@ -2507,6 +2292,16 @@
     return map.get(resolved) || map.get("none") || Object.assign({}, BASE_CLASS_FLAVOR_PROFILES.none);
   }
 
+  function getClassFlavorDisplayName(classId) {
+    const matchedId = findMatchingClassFlavorId(classId);
+    if (!matchedId) {
+      const raw = String(classId || "").trim();
+      return raw || "Unknown";
+    }
+    const profile = getClassFlavorProfileById(matchedId);
+    return String(profile && profile.label || matchedId);
+  }
+
   function getClassFlavorProfileMap() {
     const map = new Map();
     getClassFlavorProfiles().forEach((profile) => {
@@ -2520,12 +2315,46 @@
     if (!raw || raw === "no_class" || raw === "none") return "barbarian";
     const map = getClassFlavorProfileMap();
     if (map.has(raw)) return raw;
+    const profiles = getClassFlavorProfiles();
+    const labelMatch = profiles.find((profile) => slugify(profile.label || "") === raw);
+    if (labelMatch) return labelMatch.id;
     if (raw.includes("barbarian") && map.has("barbarian")) return "barbarian";
     if (raw.includes("ranger") && map.has("ranger")) return "ranger";
     if (raw.includes("monk") && map.has("monk")) return "monk";
     if (raw.includes("necro") && map.has("necromancer")) return "necromancer";
     if (raw.includes("weapon") && map.has("weapon")) return "weapon";
     return "barbarian";
+  }
+
+  function findMatchingClassFlavorId(value) {
+    const raw = slugify(value || "");
+    if (!raw || raw === "no_class" || raw === "none") return "";
+    const profiles = getClassFlavorProfiles();
+    const directMatch = profiles.find((profile) => profile.id === raw);
+    if (directMatch) return directMatch.id;
+    const labelMatch = profiles.find((profile) => slugify(profile.label || "") === raw);
+    return labelMatch ? labelMatch.id : "";
+  }
+
+  function renderSkillClassOptions(currentValue) {
+    if (!dom.skillClassInput) return;
+    const profiles = getClassFlavorProfiles();
+    const selectedId = findMatchingClassFlavorId(currentValue);
+    dom.skillClassInput.innerHTML = "";
+
+    const blankOption = document.createElement("option");
+    blankOption.value = "";
+    blankOption.textContent = "Unassigned";
+    dom.skillClassInput.appendChild(blankOption);
+
+    profiles.forEach((profile) => {
+      const option = document.createElement("option");
+      option.value = profile.id;
+      option.textContent = profile.label;
+      dom.skillClassInput.appendChild(option);
+    });
+
+    dom.skillClassInput.value = selectedId || "";
   }
 
   function getSelectedClassFlavorProfile() {
@@ -2636,17 +2465,68 @@
     state.selectedClassPaletteSwatchIndexByClass[classId] = Math.max(-1, resolvedIndex);
   }
 
-  function updateClassFlavorHint() {
+  function syncClassFlavorNameInput() {
+    if (!dom.classFlavorNameInput) return;
     const profile = getSelectedClassFlavorProfile();
-    if (!dom.classFlavorHint) return;
-    if (!profile) return;
-    const colorText = profile.defaultColorTheme || "none";
-    const paletteText = normalizePalette(profile.defaultPalette || []).join(", ") || "none";
-    const tagText = Array.isArray(profile.consistencyTags) && profile.consistencyTags.length
-      ? profile.consistencyTags.join(", ")
-      : "none";
-    dom.classFlavorHint.textContent =
-      `${profile.label} is the parent profile. Inherited defaults -> Color: ${colorText} | Palette: ${paletteText} | Consistency tags: ${tagText}.`;
+    dom.classFlavorNameInput.value = profile && profile.label ? profile.label : "";
+  }
+
+  function setClassFlavorStatus(message) {
+    if (!dom.classFlavorStatus) return;
+    dom.classFlavorStatus.textContent = String(message || "");
+  }
+
+  function normalizeSavedClassFlavorProfiles(raw) {
+    if (!Array.isArray(raw)) return [];
+    const seen = new Set();
+    return raw
+      .map((profile) => normalizeClassFlavorProfile(profile))
+      .filter((profile) => {
+        if (!profile || !profile.id || seen.has(profile.id)) return false;
+        seen.add(profile.id);
+        return true;
+      });
+  }
+
+  function normalizeClassFlavorProfile(profile) {
+    if (!profile || typeof profile !== "object") return null;
+    const id = slugify(profile.id || profile.label || "");
+    if (!id || id === "none" || id === "no_class") return null;
+    return {
+      id,
+      label: String(profile.label || titleCaseFromId(id)),
+      parentPrompt: String(profile.parentPrompt || ""),
+      defaultColorTheme: String(profile.defaultColorTheme || ""),
+      defaultPalette: normalizePalette(profile.defaultPalette || []),
+      consistencyTags: Array.isArray(profile.consistencyTags) ? profile.consistencyTags.map(String).filter(Boolean) : [],
+      isCustom: Boolean(profile.isCustom || !Object.prototype.hasOwnProperty.call(BASE_CLASS_FLAVOR_PROFILES, id))
+    };
+  }
+
+  function upsertClassFlavorProfile(profile) {
+    const normalized = normalizeClassFlavorProfile(profile);
+    if (!normalized) return null;
+    if (!Array.isArray(state.classFlavorProfiles)) {
+      state.classFlavorProfiles = [];
+    }
+    const existingIndex = state.classFlavorProfiles.findIndex((entry) => entry && entry.id === normalized.id);
+    if (existingIndex >= 0) {
+      state.classFlavorProfiles[existingIndex] = normalized;
+    } else {
+      state.classFlavorProfiles.push(normalized);
+    }
+    return normalized;
+  }
+
+  function createUniqueClassFlavorId(label) {
+    const base = slugify(label || "new_class") || "new_class";
+    const map = getClassFlavorProfileMap();
+    if (!map.has(base)) return base;
+    let index = 2;
+    while (map.has(`${base}_${index}`)) {
+      index += 1;
+    }
+    return `${base}_${index}`;
   }
 
   function getSkillIconHintPath(skillId) {
@@ -2702,9 +2582,7 @@
 
   function saveState() {
     const payload = {
-      templates: state.templates,
-      selectedTemplateId: state.selectedTemplateId,
-      templateFilterCategory: state.templateFilterCategory,
+      classFlavorProfiles: state.classFlavorProfiles,
       builder: state.builder,
       skills: state.skills,
       selectedSkillId: state.selectedSkillId,
@@ -2729,45 +2607,9 @@
     return document.getElementById(id);
   }
 
-  function initializeTemplateLibraryAccordion() {
-    if (!dom.templateLibraryPanel) return;
-    const startsExpanded = !dom.templateLibraryPanel.classList.contains("collapsed");
-    setTemplateLibraryExpanded(startsExpanded);
-  }
-
-  function onTemplateLibraryHeaderClick(event) {
-    if (isAccordionHeaderInteractiveTarget(event && event.target)) return;
-    toggleTemplateLibraryExpanded();
-  }
-
-  function onTemplateLibraryHeaderKeyDown(event) {
-    const key = String(event && event.key || "");
-    if (key !== "Enter" && key !== " ") return;
-    event.preventDefault();
-    toggleTemplateLibraryExpanded();
-  }
-
-  function isTemplateHeaderInteractiveTarget(target) {
-    return isAccordionHeaderInteractiveTarget(target);
-  }
-
   function isAccordionHeaderInteractiveTarget(target) {
     if (!target || !(target instanceof Element)) return false;
     return Boolean(target.closest("select, input, textarea, button, a, label"));
-  }
-
-  function toggleTemplateLibraryExpanded() {
-    if (!dom.templateLibraryPanel) return;
-    const isExpanded = !dom.templateLibraryPanel.classList.contains("collapsed");
-    setTemplateLibraryExpanded(!isExpanded);
-  }
-
-  function setTemplateLibraryExpanded(isExpanded) {
-    if (!dom.templateLibraryPanel || !dom.templateLibraryHeader) return;
-    dom.templateLibraryPanel.classList.toggle("collapsed", !isExpanded);
-    dom.templateLibraryHeader.setAttribute("aria-expanded", isExpanded ? "true" : "false");
-    if (dom.templateLibraryContent) dom.templateLibraryContent.hidden = !isExpanded;
-    if (dom.templateLibraryChevron) dom.templateLibraryChevron.textContent = isExpanded ? "v" : ">";
   }
 
   function initializeSkillEntryAccordion() {
@@ -2822,22 +2664,24 @@
       .filter(Boolean);
   }
 
-  function normalizeClassRulesTemplateScope(value, fallback) {
-    const raw = String(value || "").trim().toLowerCase();
-    if (raw === "class" || raw === "weapon") return raw;
-    const fallbackRaw = String(fallback || "").trim().toLowerCase();
-    if (fallbackRaw === "class" || fallbackRaw === "weapon") return fallbackRaw;
-    return "class";
+  function inferClassRulesTemplateScope() {
+    const selectedSkill = getSelectedSkillEntry();
+    if (selectedSkill) {
+      return String(selectedSkill.scope || "").trim().toLowerCase() === "weapon" ? "weapon" : "class";
+    }
+    return resolveClassFlavorId(state.builder.classFlavorId || state.builder.classFlavor) === "weapon"
+      ? "weapon"
+      : "class";
   }
 
-  function getTemplatesForClassRulesScope(scope) {
-    const resolvedScope = normalizeClassRulesTemplateScope(scope, "class");
-    const scoped = state.templates.filter((template) => {
-      const category = String(template && template.category || "").trim().toLowerCase();
-      return category === resolvedScope;
-    });
-    if (scoped.length) return scoped;
-    return state.templates.slice();
+  function getBuiltInScopePrompt(scope) {
+    const resolvedScope = String(scope || "").trim().toLowerCase() === "weapon" ? "weapon" : "class";
+    return String(BUILT_IN_SCOPE_PROMPTS[resolvedScope] || "");
+  }
+
+  function getBuiltInScopeStyleTags(scope) {
+    const resolvedScope = String(scope || "").trim().toLowerCase() === "weapon" ? "weapon" : "class";
+    return Array.isArray(BUILT_IN_SCOPE_STYLE_TAGS[resolvedScope]) ? BUILT_IN_SCOPE_STYLE_TAGS[resolvedScope].slice() : [];
   }
 
   function joinTags(tags) {

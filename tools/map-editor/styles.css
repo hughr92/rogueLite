@@ -180,6 +180,23 @@ body {
   padding: 0.22rem 0.55rem;
 }
 
+.canvas-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  pointer-events: auto;
+}
+
+.canvas-zoom-controls #zoomLabel {
+  margin: 0;
+}
+
+.canvas-zoom-btn {
+  min-width: 2.2rem;
+  padding: 0.22rem 0.5rem;
+  line-height: 1;
+}
+
 .selection-properties {
   display: grid;
   gap: 0.45rem;

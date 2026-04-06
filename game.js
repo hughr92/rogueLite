@@ -2,6 +2,7 @@
   const DATA = window.RL_DATA;
   const SAVE = window.RL_SAVE;
   const UI_FACTORY = window.RL_UI;
+  const BUNDLED_LEVEL_MAP_DATA = window.RL_BUNDLED_LEVEL_MAPS || {};
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -127,7 +128,7 @@
   });
   const MAP_EDITOR_LEVEL_SLOTS_STORAGE_KEY = "rl_map_editor_level_slots_v2";
   const BUNDLED_LEVEL_MAP_PATHS = Object.freeze({
-    level_1: "./tools/map-editor/maps/level_1_v1.json"
+    level_1: "./tools/map-editor/maps/level_1_layout.json"
   });
   const DEFAULT_MUSIC_LEVEL_INDEX = 1;
   const FIXED_WORLD_TILE_SIZE = 48;
@@ -176,8 +177,11 @@
         activeLevelIndex: DEFAULT_MUSIC_LEVEL_INDEX
       };
       this.levelMapDataCache = Object.create(null);
+      this.levelMapDataSourceCache = Object.create(null);
       this.levelMapBackgroundCache = Object.create(null);
       this.levelMapBackgroundLoadPromises = Object.create(null);
+      this.levelMapBackgroundTileCache = Object.create(null);
+      this.levelMapBackgroundTileLoadPromises = Object.create(null);
       this.backgroundImageCache = Object.create(null);
       this.backgroundImageLoadPromises = Object.create(null);
       this.backgroundDataBlobUrlCache = Object.create(null);
@@ -598,28 +602,42 @@
         return this.levelMapDataCache[safeLevelId];
       }
       const mapPath = this.getBundledLevelMapPath(safeLevelId);
+      const isFileOrigin =
+        typeof window !== "undefined" &&
+        window.location &&
+        String(window.location.protocol || "").toLowerCase() === "file:";
+      if (mapPath && !isFileOrigin) {
+        try {
+          const response = await fetch(mapPath, { cache: "no-store" });
+          if (response && response.ok) {
+            const payload = await response.json();
+            if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+              this.levelMapDataCache[safeLevelId] = payload;
+              this.levelMapDataSourceCache[safeLevelId] = "fetch";
+              return payload;
+            }
+          }
+        } catch (error) {
+          // Fall through to inline bundled data when live JSON fetch is unavailable.
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(BUNDLED_LEVEL_MAP_DATA, safeLevelId)) {
+        const inlineMapData = BUNDLED_LEVEL_MAP_DATA[safeLevelId];
+        this.levelMapDataCache[safeLevelId] =
+          inlineMapData && typeof inlineMapData === "object" && !Array.isArray(inlineMapData)
+            ? JSON.parse(JSON.stringify(inlineMapData))
+            : null;
+        this.levelMapDataSourceCache[safeLevelId] = "inline";
+        return this.levelMapDataCache[safeLevelId];
+      }
       if (!mapPath) {
         this.levelMapDataCache[safeLevelId] = null;
+        this.levelMapDataSourceCache[safeLevelId] = "none";
         return null;
       }
-
-      try {
-        const response = await fetch(mapPath, { cache: "no-store" });
-        if (!response || !response.ok) {
-          this.levelMapDataCache[safeLevelId] = null;
-          return null;
-        }
-        const payload = await response.json();
-        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-          this.levelMapDataCache[safeLevelId] = null;
-          return null;
-        }
-        this.levelMapDataCache[safeLevelId] = payload;
-        return payload;
-      } catch (error) {
-        this.levelMapDataCache[safeLevelId] = null;
-        return null;
-      }
+      this.levelMapDataCache[safeLevelId] = null;
+      this.levelMapDataSourceCache[safeLevelId] = "none";
+      return null;
     }
 
     extractMapBackgroundConfig(mapData) {
@@ -630,14 +648,15 @@
       if (!src) return null;
       const parsedMapWidth = Number(mapData.width);
       const parsedMapHeight = Number(mapData.height);
+      if (!Number.isFinite(parsedMapWidth) || !Number.isFinite(parsedMapHeight)) return null;
       const parsedOpacity = Number(rawBackground.opacity);
       const parsedScale = Number(rawBackground.scale);
       const parsedOffsetX = Number(rawBackground.offsetX);
       const parsedOffsetY = Number(rawBackground.offsetY);
-      const mapWidth = Number.isFinite(parsedMapWidth) ? Math.max(1, parsedMapWidth) : FIXED_WORLD_WIDTH;
-      const mapHeight = Number.isFinite(parsedMapHeight) ? Math.max(1, parsedMapHeight) : FIXED_WORLD_HEIGHT;
+      const mapWidth = Math.max(1, parsedMapWidth);
+      const mapHeight = Math.max(1, parsedMapHeight);
       const opacity = Number.isFinite(parsedOpacity) ? clamp(parsedOpacity, 0, 1) : 0.5;
-      const scale = Number.isFinite(parsedScale) ? clamp(parsedScale, 0.05, 6) : 1;
+      const scale = Number.isFinite(parsedScale) ? clamp(parsedScale, 0.05, 10) : 1;
       const offsetX = Number.isFinite(parsedOffsetX) ? parsedOffsetX : 0;
       const offsetY = Number.isFinite(parsedOffsetY) ? parsedOffsetY : 0;
       return {
@@ -648,6 +667,29 @@
         offsetY,
         mapWidth,
         mapHeight
+      };
+    }
+
+    extractMapBackgroundBaseColor(mapData) {
+      if (!mapData || typeof mapData !== "object" || Array.isArray(mapData)) return null;
+      const rawColor = String(mapData.backgroundBaseColor || "").trim();
+      if (!/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(rawColor)) return null;
+      if (rawColor.length === 7) return rawColor.toLowerCase();
+      return `#${rawColor[1]}${rawColor[1]}${rawColor[2]}${rawColor[2]}${rawColor[3]}${rawColor[3]}`.toLowerCase();
+    }
+
+    extractMapBackgroundTileConfig(mapData) {
+      if (!mapData || typeof mapData !== "object" || Array.isArray(mapData)) return null;
+      const rawTile = mapData.backgroundTile;
+      if (!rawTile || typeof rawTile !== "object" || Array.isArray(rawTile)) return null;
+      const src = String(rawTile.src || "").trim();
+      if (!src) return null;
+      const parsedSize = Number(rawTile.size);
+      const parsedOpacity = Number(rawTile.opacity);
+      return {
+        src,
+        size: Number.isFinite(parsedSize) ? clamp(Math.round(parsedSize), 16, 10000) : 512,
+        opacity: Number.isFinite(parsedOpacity) ? clamp(parsedOpacity, 0, 1) : 1
       };
     }
 
@@ -664,16 +706,108 @@
       };
     }
 
+    extractMapWorldDimensions(mapData) {
+      if (!mapData || typeof mapData !== "object" || Array.isArray(mapData)) return null;
+      const parsedWidth = Number(mapData.width);
+      const parsedHeight = Number(mapData.height);
+      if (!Number.isFinite(parsedWidth) || !Number.isFinite(parsedHeight)) return null;
+      return {
+        width: Math.max(1, parsedWidth),
+        height: Math.max(1, parsedHeight)
+      };
+    }
+
+    getRunWorldDimensionsForLevel(levelId) {
+      const safeLevelId = String(levelId || "").trim();
+      const bundledMapData = safeLevelId ? this.levelMapDataCache[safeLevelId] : null;
+      const extracted = this.extractMapWorldDimensions(bundledMapData);
+
+      if (extracted) {
+        return {
+          usesMap: true,
+          width: Math.max(1, Number(extracted.width)),
+          height: Math.max(1, Number(extracted.height))
+        };
+      }
+
+      return {
+        usesMap: false,
+        width: FIXED_WORLD_WIDTH,
+        height: FIXED_WORLD_HEIGHT
+      };
+    }
+
+    getCameraWindowDimensionsForWorld(worldWidth, worldHeight, usesMapWorld) {
+      if (!usesMapWorld) {
+        return {
+          width: Math.max(1, Number(worldWidth || FIXED_WORLD_WIDTH)),
+          height: Math.max(1, Number(worldHeight || FIXED_WORLD_HEIGHT))
+        };
+      }
+      return {
+        width: this.getCameraAxisSize(worldWidth, FIXED_WORLD_WIDTH),
+        height: this.getCameraAxisSize(worldHeight, FIXED_WORLD_HEIGHT)
+      };
+    }
+
+    getCameraAxisSize(worldSize, fixedSize) {
+      const safeWorldSize = Math.max(1, Number(worldSize || fixedSize || 1));
+      const safeFixedSize = Math.max(1, Number(fixedSize || safeWorldSize || 1));
+      if (safeWorldSize <= safeFixedSize) return safeWorldSize;
+      if (safeWorldSize < safeFixedSize * 2) return Math.max(1, Math.floor(safeWorldSize * 0.5));
+      return safeFixedSize;
+    }
+
     getRunPlayerStartForLevel(levelId, worldWidth, worldHeight) {
       const safeLevelId = String(levelId || "").trim();
       if (!safeLevelId) return null;
-      const savedMapData = this.getSavedMapDataForLevel(safeLevelId);
-      const savedStart = this.extractMapPlayerStart(savedMapData, worldWidth, worldHeight);
-      if (savedStart) return savedStart;
       const bundledMapData = this.levelMapDataCache[safeLevelId];
       const bundledStart = this.extractMapPlayerStart(bundledMapData, worldWidth, worldHeight);
       if (bundledStart) return bundledStart;
       return null;
+    }
+
+    getRunCamera(run) {
+      if (!run || !run.camera) return null;
+      return run.camera;
+    }
+
+    syncPlayerWorldPosition(player) {
+      if (!player || typeof player !== "object") return;
+      const fallbackX = Number.isFinite(Number(player.x)) ? Number(player.x) : 0;
+      const fallbackY = Number.isFinite(Number(player.y)) ? Number(player.y) : 0;
+      const worldX = Number.isFinite(Number(player.worldX)) ? Number(player.worldX) : fallbackX;
+      const worldY = Number.isFinite(Number(player.worldY)) ? Number(player.worldY) : fallbackY;
+      player.worldX = worldX;
+      player.worldY = worldY;
+      player.x = worldX;
+      player.y = worldY;
+    }
+
+    clampPlayerToWorldBounds(player, world) {
+      if (!player || !world) return;
+      const radius = Math.max(0, Number(player.radius || 0));
+      const maxX = Math.max(radius, Number(world.width || 0) - radius);
+      const maxY = Math.max(radius, Number(world.height || 0) - radius);
+      player.worldX = clamp(Number(player.worldX || 0), radius, maxX);
+      player.worldY = clamp(Number(player.worldY || 0), radius, maxY);
+      this.syncPlayerWorldPosition(player);
+    }
+
+    clampCameraToWorld(camera, world) {
+      if (!camera || !world) return;
+      const maxX = Math.max(0, Number(world.width || 0) - Number(camera.width || 0));
+      const maxY = Math.max(0, Number(world.height || 0) - Number(camera.height || 0));
+      camera.x = clamp(Number(camera.x || 0), 0, maxX);
+      camera.y = clamp(Number(camera.y || 0), 0, maxY);
+    }
+
+    updateCameraForRun(run) {
+      if (!run || !run.player || !run.camera || !run.world) return;
+      this.syncPlayerWorldPosition(run.player);
+      run.camera.x = Number(run.player.worldX || 0) - Number(run.camera.width || 0) * 0.5;
+      run.camera.y = Number(run.player.worldY || 0) - Number(run.camera.height || 0) * 0.5;
+      this.clampCameraToWorld(run.camera, run.world);
     }
 
     buildMapBackgroundSignature(config) {
@@ -686,6 +820,15 @@
         String(Number(config.offsetY || 0)),
         String(Number(config.mapWidth || 0)),
         String(Number(config.mapHeight || 0))
+      ].join("|");
+    }
+
+    buildMapBackgroundTileSignature(config) {
+      if (!config) return "";
+      return [
+        String(config.src || ""),
+        String(Number(config.size || 0)),
+        String(Number(config.opacity ?? 1))
       ].join("|");
     }
 
@@ -725,7 +868,7 @@
     async resolveBlobUrlForDataSource(rawSrc) {
       const safeSrc = String(rawSrc || "").trim();
       if (!safeSrc.startsWith("data:")) return null;
-      if (typeof fetch !== "function" || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+      if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
         return null;
       }
       if (Object.prototype.hasOwnProperty.call(this.backgroundDataBlobUrlCache, safeSrc)) {
@@ -733,19 +876,46 @@
       }
 
       try {
-        const response = await fetch(safeSrc);
-        if (!response || !response.ok) {
-          this.backgroundDataBlobUrlCache[safeSrc] = null;
-          return null;
+        const dataMatch = safeSrc.match(/^data:([^;,]*)(;base64)?,([\s\S]*)$/i);
+        if (dataMatch) {
+          const mimeType = dataMatch[1] || "application/octet-stream";
+          const isBase64 = Boolean(dataMatch[2]);
+          const payload = dataMatch[3] || "";
+          let blob = null;
+
+          if (isBase64 && typeof atob === "function") {
+            const binary = atob(payload);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            blob = new Blob([bytes], { type: mimeType });
+          } else {
+            blob = new Blob([decodeURIComponent(payload)], { type: mimeType });
+          }
+
+          const blobUrl = URL.createObjectURL(blob);
+          this.backgroundDataBlobUrlCache[safeSrc] = blobUrl;
+          return blobUrl;
         }
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        this.backgroundDataBlobUrlCache[safeSrc] = blobUrl;
-        return blobUrl;
+
+        if (typeof fetch === "function") {
+          const response = await fetch(safeSrc);
+          if (!response || !response.ok) {
+            this.backgroundDataBlobUrlCache[safeSrc] = null;
+            return null;
+          }
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          this.backgroundDataBlobUrlCache[safeSrc] = blobUrl;
+          return blobUrl;
+        }
       } catch (error) {
         this.backgroundDataBlobUrlCache[safeSrc] = null;
         return null;
       }
+      this.backgroundDataBlobUrlCache[safeSrc] = null;
+      return null;
     }
 
     loadImageFromSource(source) {
@@ -799,18 +969,15 @@
       const safeLevelId = String(levelId || "").trim();
       if (!safeLevelId) return null;
 
-      const localMap = this.getSavedMapDataForLevel(safeLevelId);
-      let backgroundConfig = this.extractMapBackgroundConfig(localMap);
-      if (!backgroundConfig) {
-        const bundledMap = await this.getBundledMapDataForLevel(safeLevelId);
-        backgroundConfig = this.extractMapBackgroundConfig(bundledMap);
-      }
+      const bundledMap = await this.getBundledMapDataForLevel(safeLevelId);
+      const backgroundConfig = this.extractMapBackgroundConfig(bundledMap);
       if (!backgroundConfig) return null;
+      const backgroundSignature = this.buildMapBackgroundSignature(backgroundConfig);
+      if (!backgroundSignature) return null;
 
-      const signature = this.buildMapBackgroundSignature(backgroundConfig);
       const cached = this.levelMapBackgroundCache[safeLevelId];
-      if (cached && cached.signature === signature && cached.background) {
-        return cached.background;
+      if (cached && cached.signature && cached.background) {
+        if (cached.signature === backgroundSignature) return cached.background;
       }
 
       const image = await this.loadBackgroundImage(backgroundConfig.src);
@@ -821,25 +988,115 @@
         image
       };
       this.levelMapBackgroundCache[safeLevelId] = {
-        signature,
+        signature: backgroundSignature,
         background: resolved
       };
       return resolved;
+    }
+
+    async resolveLevelMapBackgroundTile(levelId) {
+      const safeLevelId = String(levelId || "").trim();
+      if (!safeLevelId) return null;
+
+      const bundledMap = await this.getBundledMapDataForLevel(safeLevelId);
+      const tileConfig = this.extractMapBackgroundTileConfig(bundledMap);
+      if (!tileConfig) return null;
+      const tileSignature = this.buildMapBackgroundTileSignature(tileConfig);
+      if (!tileSignature) return null;
+
+      const cached = this.levelMapBackgroundTileCache[safeLevelId];
+      if (cached && cached.signature === tileSignature && cached.tile) {
+        return cached.tile;
+      }
+
+      const image = await this.loadBackgroundImage(tileConfig.src);
+      const resolved = {
+        ...tileConfig,
+        image: image || null
+      };
+      this.levelMapBackgroundTileCache[safeLevelId] = {
+        signature: tileSignature,
+        tile: resolved
+      };
+      return resolved;
+    }
+
+    getPreparedLevelMapBackground(levelId) {
+      const safeLevelId = String(levelId || "").trim();
+      if (!safeLevelId) return null;
+      const bundledMap = this.levelMapDataCache[safeLevelId];
+      const backgroundConfig = this.extractMapBackgroundConfig(bundledMap);
+      if (!backgroundConfig) return null;
+      const backgroundSignature = this.buildMapBackgroundSignature(backgroundConfig);
+      const cached = this.levelMapBackgroundCache[safeLevelId];
+      if (cached && cached.signature === backgroundSignature && cached.background) {
+        return { ...cached.background };
+      }
+      return {
+        ...backgroundConfig,
+        image: null
+      };
+    }
+
+    getPreparedLevelMapBackgroundTile(levelId) {
+      const safeLevelId = String(levelId || "").trim();
+      if (!safeLevelId) return null;
+      const bundledMap = this.levelMapDataCache[safeLevelId];
+      const tileConfig = this.extractMapBackgroundTileConfig(bundledMap);
+      if (!tileConfig) return null;
+      const tileSignature = this.buildMapBackgroundTileSignature(tileConfig);
+      const cached = this.levelMapBackgroundTileCache[safeLevelId];
+      if (cached && cached.signature === tileSignature && cached.tile) {
+        return { ...cached.tile };
+      }
+      return {
+        ...tileConfig,
+        image: null
+      };
     }
 
     attachRunMapBackground(runState) {
       if (!runState || !runState.level || !runState.level.id) return;
       const levelId = String(runState.level.id).trim();
       if (!levelId) return;
+      const bundledMap = this.levelMapDataCache[levelId];
 
-      runState.mapBackground = null;
+      runState.mapBackgroundBaseColor = this.extractMapBackgroundBaseColor(bundledMap) || "#10151d";
+
+      runState.mapBackgroundTile = this.getPreparedLevelMapBackgroundTile(levelId);
+      if (runState.mapBackgroundTile && !runState.mapBackgroundTile.image) {
+        if (Object.prototype.hasOwnProperty.call(this.levelMapBackgroundTileLoadPromises, levelId)) {
+          this.levelMapBackgroundTileLoadPromises[levelId]
+            .then((tile) => {
+              if (tile) runState.mapBackgroundTile = tile;
+            })
+            .catch(() => {
+              // Keep tile placement active even if image loading fails.
+            });
+        } else {
+          const tileLoadPromise = this.resolveLevelMapBackgroundTile(levelId);
+          this.levelMapBackgroundTileLoadPromises[levelId] = tileLoadPromise;
+          tileLoadPromise
+            .then((tile) => {
+              if (tile) runState.mapBackgroundTile = tile;
+            })
+            .finally(() => {
+              delete this.levelMapBackgroundTileLoadPromises[levelId];
+            });
+        }
+      }
+
+      runState.mapBackground = this.getPreparedLevelMapBackground(levelId);
+      if (!runState.mapBackground) return;
+      if (runState.mapBackground.image) return;
+
       if (Object.prototype.hasOwnProperty.call(this.levelMapBackgroundLoadPromises, levelId)) {
         this.levelMapBackgroundLoadPromises[levelId]
           .then((background) => {
             if (background) runState.mapBackground = background;
           })
           .catch(() => {
-            // Ignore map background load errors and keep fallback rendering.
+            // Keep the JSON-driven background placement active even if image loading fails.
           });
         return;
       }
@@ -855,22 +1112,84 @@
         });
     }
 
-    drawRunMapBackground(background, worldWidth, worldHeight) {
-      if (!background || !background.image) return false;
-      const image = background.image;
-      if (!image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return false;
+    drawRunMapBackgroundTile(tile, worldWidth, worldHeight) {
+      if (!tile) return false;
+      const parsedTileSize = Number(tile.size);
+      if (!Number.isFinite(parsedTileSize) || parsedTileSize < 16) return false;
 
       const ctx = this.ctx;
-      const sourceWidth = Math.max(1, Number(background.mapWidth || image.naturalWidth));
-      const sourceHeight = Math.max(1, Number(background.mapHeight || image.naturalHeight));
+      const image = tile.image || null;
+      const tileSize = Math.max(16, parsedTileSize);
+      const opacity = clamp(Number(tile.opacity ?? 1), 0, 1);
+      const run = this.currentRun;
+      const camera = this.getRunCamera(run) || { x: 0, y: 0, width: worldWidth, height: worldHeight };
+      const minX = clamp(Math.floor(Number(camera.x || 0) / tileSize) * tileSize, 0, worldWidth);
+      const minY = clamp(Math.floor(Number(camera.y || 0) / tileSize) * tileSize, 0, worldHeight);
+      const maxX = clamp(Math.ceil((Number(camera.x || 0) + Number(camera.width || worldWidth)) / tileSize) * tileSize + tileSize, 0, worldWidth);
+      const maxY = clamp(Math.ceil((Number(camera.y || 0) + Number(camera.height || worldHeight)) / tileSize) * tileSize + tileSize, 0, worldHeight);
+      const previousSmoothing = ctx.imageSmoothingEnabled;
+      const worldOverlap = 1 / Math.max(0.0001, Number((this.renderViewport && this.renderViewport.scale) || 1));
+      ctx.imageSmoothingEnabled = false;
+
+      for (let y = minY; y < maxY; y += tileSize) {
+        for (let x = minX; x < maxX; x += tileSize) {
+          const drawWidth = Math.min(tileSize, Math.max(0, worldWidth - x));
+          const drawHeight = Math.min(tileSize, Math.max(0, worldHeight - y));
+          if (drawWidth <= 0 || drawHeight <= 0) continue;
+          const drawLeft = Math.max(0, x - worldOverlap * 0.5);
+          const drawTop = Math.max(0, y - worldOverlap * 0.5);
+          const drawRight = Math.min(worldWidth, x + drawWidth + worldOverlap * 0.5);
+          const drawBottom = Math.min(worldHeight, y + drawHeight + worldOverlap * 0.5);
+          ctx.save();
+          ctx.globalAlpha = opacity;
+          if (image && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+            ctx.drawImage(image, drawLeft, drawTop, Math.max(1, drawRight - drawLeft), Math.max(1, drawBottom - drawTop));
+            ctx.restore();
+            continue;
+          }
+          ctx.fillStyle = ((Math.floor(x / tileSize) + Math.floor(y / tileSize)) % 2 === 0) ? "#1e2a35" : "#18222c";
+          ctx.fillRect(drawLeft, drawTop, Math.max(1, drawRight - drawLeft), Math.max(1, drawBottom - drawTop));
+          ctx.strokeStyle = "rgba(98, 123, 150, 0.28)";
+          ctx.lineWidth = Math.max(1, tileSize * 0.01);
+          ctx.strokeRect(drawLeft, drawTop, Math.max(1, drawRight - drawLeft), Math.max(1, drawBottom - drawTop));
+          ctx.restore();
+        }
+      }
+      ctx.imageSmoothingEnabled = previousSmoothing;
+      return true;
+    }
+
+    drawRunMapBackground(background, worldWidth, worldHeight) {
+      if (!background) return false;
+
+      const ctx = this.ctx;
+      const image = background.image || null;
+      const parsedSourceWidth = Number(background.mapWidth);
+      const parsedSourceHeight = Number(background.mapHeight);
+      if (!Number.isFinite(parsedSourceWidth) || !Number.isFinite(parsedSourceHeight)) return false;
+      const sourceWidth = Math.max(1, parsedSourceWidth);
+      const sourceHeight = Math.max(1, parsedSourceHeight);
       const fitScale = Math.min(worldWidth / sourceWidth, worldHeight / sourceHeight);
-      const userScale = clamp(Number(background.scale || 1), 0.05, 6);
+      const userScale = clamp(Number(background.scale || 1), 0.05, 10);
       const drawWidth = sourceWidth * fitScale * userScale;
       const drawHeight = sourceHeight * fitScale * userScale;
       const drawCenterX = worldWidth * 0.5 + Number(background.offsetX || 0) * fitScale;
       const drawCenterY = worldHeight * 0.5 + Number(background.offsetY || 0) * fitScale;
       const drawLeft = drawCenterX - drawWidth * 0.5;
       const drawTop = drawCenterY - drawHeight * 0.5;
+
+      if (!image || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0.08, clamp(Number(background.opacity), 0, 1) * 0.4);
+        ctx.fillStyle = "#243140";
+        ctx.fillRect(drawLeft, drawTop, drawWidth, drawHeight);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "rgba(117, 148, 186, 0.35)";
+        ctx.lineWidth = Math.max(2, Math.min(worldWidth, worldHeight) * 0.0025);
+        ctx.strokeRect(drawLeft, drawTop, drawWidth, drawHeight);
+        ctx.restore();
+        return true;
+      }
 
       ctx.save();
       ctx.globalAlpha = clamp(Number(background.opacity), 0, 1);
@@ -1450,8 +1769,11 @@
         const viewport = this.getRenderViewport(run);
         const worldWidth = run && run.world ? run.world.width : FIXED_WORLD_WIDTH;
         const worldHeight = run && run.world ? run.world.height : FIXED_WORLD_HEIGHT;
-        const worldX = (screenX - viewport.offsetX) / Math.max(0.0001, viewport.scale);
-        const worldY = (screenY - viewport.offsetY) / Math.max(0.0001, viewport.scale);
+        const camera = run ? this.getRunCamera(run) : null;
+        const cameraX = camera ? Number(camera.x || 0) : 0;
+        const cameraY = camera ? Number(camera.y || 0) : 0;
+        const worldX = cameraX + (screenX - viewport.offsetX) / Math.max(0.0001, viewport.scale);
+        const worldY = cameraY + (screenY - viewport.offsetY) / Math.max(0.0001, viewport.scale);
         this.input.mouseX = clamp(worldX, 0, worldWidth);
         this.input.mouseY = clamp(worldY, 0, worldHeight);
       });
@@ -1459,8 +1781,9 @@
 
     updateRenderViewport(screenWidth, screenHeight) {
       const run = this.currentRun;
-      const worldWidth = run && run.world ? Math.max(1, Number(run.world.width || FIXED_WORLD_WIDTH)) : FIXED_WORLD_WIDTH;
-      const worldHeight = run && run.world ? Math.max(1, Number(run.world.height || FIXED_WORLD_HEIGHT)) : FIXED_WORLD_HEIGHT;
+      const camera = run ? this.getRunCamera(run) : null;
+      const worldWidth = camera ? Math.max(1, Number(camera.width || FIXED_WORLD_WIDTH)) : FIXED_WORLD_WIDTH;
+      const worldHeight = camera ? Math.max(1, Number(camera.height || FIXED_WORLD_HEIGHT)) : FIXED_WORLD_HEIGHT;
       const safeScreenWidth = Math.max(1, Math.floor(Number(screenWidth || 1)));
       const safeScreenHeight = Math.max(1, Math.floor(Number(screenHeight || 1)));
       const scale = Math.max(0.0001, Math.min(safeScreenWidth / worldWidth, safeScreenHeight / worldHeight));
@@ -1484,6 +1807,7 @@
     getRenderViewport(run) {
       const viewport = this.renderViewport || null;
       if (!viewport) {
+        const camera = run ? this.getRunCamera(run) : null;
         return {
           screenWidth: 1,
           screenHeight: 1,
@@ -1492,8 +1816,8 @@
           scale: 1,
           offsetX: 0,
           offsetY: 0,
-          viewportWidth: run && run.world ? run.world.width : FIXED_WORLD_WIDTH,
-          viewportHeight: run && run.world ? run.world.height : FIXED_WORLD_HEIGHT
+          viewportWidth: camera ? camera.width : FIXED_WORLD_WIDTH,
+          viewportHeight: camera ? camera.height : FIXED_WORLD_HEIGHT
         };
       }
       return viewport;
@@ -2129,7 +2453,8 @@
         didSpin: false,
         noStroke: true,
         visualSpriteId: "ground_slam",
-        visualSize: Math.max(96, range * 1.7)
+        visualRotation: player.facing,
+        visualSize: Math.max(96, range * 2.05)
       });
       if (hitAny) {
         this.gainRage(run, (run.player.rage.gainOnHit || 0) * 2);
@@ -3133,15 +3458,17 @@
 
     isObstacleVisibleInViewport(run, obstacle, margin) {
       if (!run || !obstacle) return false;
+      const camera = this.getRunCamera(run);
+      if (!camera) return false;
       const obstacleSize = this.getObstacleHalfExtents(obstacle);
       const halfW = obstacleSize.halfW;
       const halfH = obstacleSize.halfH;
       const extraMargin = Math.max(0, Number(margin || 0));
       return !(
-        obstacle.x < -halfW - extraMargin ||
-        obstacle.y < -halfH - extraMargin ||
-        obstacle.x > run.world.width + halfW + extraMargin ||
-        obstacle.y > run.world.height + halfH + extraMargin
+        obstacle.x < Number(camera.x || 0) - halfW - extraMargin ||
+        obstacle.y < Number(camera.y || 0) - halfH - extraMargin ||
+        obstacle.x > Number(camera.x || 0) + Number(camera.width || 0) + halfW + extraMargin ||
+        obstacle.y > Number(camera.y || 0) + Number(camera.height || 0) + halfH + extraMargin
       );
     }
 
@@ -3196,6 +3523,12 @@
     trySpawnDirectionalTerrainObstacle(run, obstacles, config, terrainTypes, direction) {
       if (!run || !Array.isArray(obstacles) || !terrainTypes || !terrainTypes.length || !direction) return false;
       const player = run.player || { x: run.world.width * 0.5, y: run.world.height * 0.5, radius: 0 };
+      const camera = this.getRunCamera(run) || {
+        x: Math.max(0, Number(player.x || 0) - FIXED_WORLD_WIDTH * 0.5),
+        y: Math.max(0, Number(player.y || 0) - FIXED_WORLD_HEIGHT * 0.5),
+        width: FIXED_WORLD_WIDTH,
+        height: FIXED_WORLD_HEIGHT
+      };
       const minDistance = Math.max(0, config.minDistanceFromPlayerStart + (player.radius || 0));
       const edgePadding = Math.max(0, Number(config.edgePadding || 0));
       const baseBuffer = Math.max(0, Number(config.spawnOffscreenBuffer || 0));
@@ -3221,27 +3554,39 @@
         let x = 0;
         let y = 0;
         if (direction === "left") {
-          x = -halfW - extraBuffer;
-          const minY = edgePadding + halfH;
-          const maxY = run.world.height - edgePadding - halfH;
+          x = Number(camera.x || 0) - halfW - extraBuffer;
+          const minY = Math.max(edgePadding + halfH, Number(camera.y || 0) + edgePadding + halfH);
+          const maxY = Math.min(
+            run.world.height - edgePadding - halfH,
+            Number(camera.y || 0) + Number(camera.height || 0) - edgePadding - halfH
+          );
           if (maxY <= minY) continue;
           y = randRange(minY, maxY);
         } else if (direction === "right") {
-          x = run.world.width + halfW + extraBuffer;
-          const minY = edgePadding + halfH;
-          const maxY = run.world.height - edgePadding - halfH;
+          x = Number(camera.x || 0) + Number(camera.width || 0) + halfW + extraBuffer;
+          const minY = Math.max(edgePadding + halfH, Number(camera.y || 0) + edgePadding + halfH);
+          const maxY = Math.min(
+            run.world.height - edgePadding - halfH,
+            Number(camera.y || 0) + Number(camera.height || 0) - edgePadding - halfH
+          );
           if (maxY <= minY) continue;
           y = randRange(minY, maxY);
         } else if (direction === "up") {
-          y = -halfH - extraBuffer;
-          const minX = edgePadding + halfW;
-          const maxX = run.world.width - edgePadding - halfW;
+          y = Number(camera.y || 0) - halfH - extraBuffer;
+          const minX = Math.max(edgePadding + halfW, Number(camera.x || 0) + edgePadding + halfW);
+          const maxX = Math.min(
+            run.world.width - edgePadding - halfW,
+            Number(camera.x || 0) + Number(camera.width || 0) - edgePadding - halfW
+          );
           if (maxX <= minX) continue;
           x = randRange(minX, maxX);
         } else if (direction === "down") {
-          y = run.world.height + halfH + extraBuffer;
-          const minX = edgePadding + halfW;
-          const maxX = run.world.width - edgePadding - halfW;
+          y = Number(camera.y || 0) + Number(camera.height || 0) + halfH + extraBuffer;
+          const minX = Math.max(edgePadding + halfW, Number(camera.x || 0) + edgePadding + halfW);
+          const maxX = Math.min(
+            run.world.width - edgePadding - halfW,
+            Number(camera.x || 0) + Number(camera.width || 0) - edgePadding - halfW
+          );
           if (maxX <= minX) continue;
           x = randRange(minX, maxX);
         } else {
@@ -3463,15 +3808,28 @@
       const halfRangeX = (world.width * config.spawnAreaWidthMultiplier) * 0.5;
       const halfRangeY = (world.height * config.spawnAreaHeightMultiplier) * 0.5;
       const obstacles = [];
+      const run = this.currentRun;
+      const camera = this.getRunCamera(run) || {
+        x: Math.max(0, centerX - FIXED_WORLD_WIDTH * 0.5),
+        y: Math.max(0, centerY - FIXED_WORLD_HEIGHT * 0.5),
+        width: FIXED_WORLD_WIDTH,
+        height: FIXED_WORLD_HEIGHT
+      };
       const terrainTypes = this.terrainTypes && this.terrainTypes.length ? this.terrainTypes : this.getTerrainTypeCatalog();
       if (!terrainTypes.length) return [];
       const buildObstacleBounds = (halfW, halfH, inViewOnly) => {
         if (inViewOnly) {
           return {
-            minX: config.edgePadding + halfW,
-            maxX: world.width - config.edgePadding - halfW,
-            minY: config.edgePadding + halfH,
-            maxY: world.height - config.edgePadding - halfH
+            minX: Math.max(config.edgePadding + halfW, Number(camera.x || 0) + config.edgePadding + halfW),
+            maxX: Math.min(
+              world.width - config.edgePadding - halfW,
+              Number(camera.x || 0) + Number(camera.width || 0) - config.edgePadding - halfW
+            ),
+            minY: Math.max(config.edgePadding + halfH, Number(camera.y || 0) + config.edgePadding + halfH),
+            maxY: Math.min(
+              world.height - config.edgePadding - halfH,
+              Number(camera.y || 0) + Number(camera.height || 0) - config.edgePadding - halfH
+            )
           };
         }
         return {
@@ -3636,6 +3994,72 @@
         }
       }
 
+      return { x: appliedX, y: appliedY };
+    }
+
+    canPlayerOccupyPosition(x, y) {
+      const run = this.currentRun;
+      if (!run || !run.player || !run.world) return false;
+      const player = run.player;
+      const radius = Math.max(0, Number(player.radius || 0));
+      const minX = radius;
+      const minY = radius;
+      const maxX = Math.max(radius, Number(run.world.width || 0) - radius);
+      const maxY = Math.max(radius, Number(run.world.height || 0) - radius);
+      if (x < minX || x > maxX || y < minY || y > maxY) return false;
+
+      const arena = run.bossEncounter && run.bossEncounter.arena ? run.bossEncounter.arena : null;
+      if (arena && arena.active) {
+        const halfW = Math.max(1, Number(arena.width || 0) * 0.5);
+        const halfH = Math.max(1, Number(arena.height || 0) * 0.5);
+        const left = Number(arena.centerX || 0) - halfW;
+        const right = Number(arena.centerX || 0) + halfW;
+        const top = Number(arena.centerY || 0) - halfH;
+        const bottom = Number(arena.centerY || 0) + halfH;
+        if (x - radius < left || x + radius > right || y - radius < top || y + radius > bottom) {
+          return false;
+        }
+      }
+
+      const obstacles = this.getBlockingTerrainObstacles(run, "blocksPlayer");
+      if (!obstacles.length) return true;
+      const padding = this.getObstacleConfig().playerCollisionPadding;
+      return !this.isCircleOverlappingAnyObstacle(x, y, radius, obstacles, padding);
+    }
+
+    applyPlayerMovementWithObstacleCollision(deltaX, deltaY) {
+      const run = this.currentRun;
+      if (!run || !run.player) return { x: 0, y: 0 };
+      const player = run.player;
+      this.syncPlayerWorldPosition(player);
+
+      const distance = Math.hypot(deltaX, deltaY);
+      const steps = Math.max(1, Math.ceil(distance / 6));
+      const stepX = deltaX / steps;
+      const stepY = deltaY / steps;
+      let appliedX = 0;
+      let appliedY = 0;
+
+      for (let i = 0; i < steps; i += 1) {
+        if (stepX !== 0) {
+          const nextX = Number(player.worldX || 0) + stepX;
+          const currentY = Number(player.worldY || 0);
+          if (this.canPlayerOccupyPosition(nextX, currentY)) {
+            player.worldX = nextX;
+            appliedX += stepX;
+          }
+        }
+        if (stepY !== 0) {
+          const currentX = Number(player.worldX || 0);
+          const nextY = Number(player.worldY || 0) + stepY;
+          if (this.canPlayerOccupyPosition(currentX, nextY)) {
+            player.worldY = nextY;
+            appliedY += stepY;
+          }
+        }
+      }
+
+      this.clampPlayerToWorldBounds(player, run.world);
       return { x: appliedX, y: appliedY };
     }
 
@@ -4547,13 +4971,15 @@
       const axeData = DATA.WEAPONS.axe;
       const javelinData = DATA.WEAPONS.javelin;
       const playerBase = DATA.PLAYER_BASE;
-      const width = FIXED_WORLD_WIDTH;
-      const height = FIXED_WORLD_HEIGHT;
       const availableWeaponSkillIds = this.getRunEquippedWeaponSkillIds(character);
       const activeRangedWeaponSkillId = this.getRunActiveRangedWeaponSkillId(character);
       const totalUpgradeCapacity = this.calculateUpgradeCapacityForWeaponSet(availableWeaponSkillIds);
       const level = this.resolveSelectedLevelForCharacter(character, selectedLevel && selectedLevel.id);
       const difficulty = this.resolveSelectedDifficultyForCharacter(character, level, selectedDifficulty);
+      const worldDimensions = this.getRunWorldDimensionsForLevel(level && level.id);
+      const width = Math.max(1, Number(worldDimensions.width || FIXED_WORLD_WIDTH));
+      const height = Math.max(1, Number(worldDimensions.height || FIXED_WORLD_HEIGHT));
+      const cameraDimensions = this.getCameraWindowDimensionsForWorld(width, height, Boolean(worldDimensions.usesMap));
       const configuredPlayerStart = this.getRunPlayerStartForLevel(level && level.id, width, height);
       const initialPlayerStart = configuredPlayerStart || { x: width * 0.5, y: height * 0.5 };
 
@@ -4577,12 +5003,20 @@
         },
         attributeEffects: null,
         world: { width, height },
+        camera: {
+          x: 0,
+          y: 0,
+          width: cameraDimensions.width,
+          height: cameraDimensions.height
+        },
         playerStart: initialPlayerStart,
         worldOffset: { x: 0, y: 0 },
         terrainRuntime: {
           movementSpawnTimer: 0,
           lastDirection: null
         },
+        mapBackgroundBaseColor: "#10151d",
+        mapBackgroundTile: null,
         mapBackground: null,
         debug: {
           terrainEnabled: this.getObstacleConfig().debug.terrainEnabled,
@@ -4600,6 +5034,8 @@
         player: {
           x: initialPlayerStart.x,
           y: initialPlayerStart.y,
+          worldX: initialPlayerStart.x,
+          worldY: initialPlayerStart.y,
           radius: playerBase.radius,
           baseMoveSpeed: playerBase.moveSpeed,
           moveSpeed: playerBase.moveSpeed,
@@ -4722,16 +5158,48 @@
       this.applyAttributeBaseStats(runState);
       this.recalculateWeaponStats(runState);
       this.attachRunMapBackground(runState);
+      this.updateCameraForRun(runState);
       return runState;
     }
 
-    startRunFromSelection() {
+    async ensureBundledLevelDataReady(levelId) {
+      const safeLevelId = String(levelId || "").trim();
+      if (!safeLevelId) return null;
+      return this.getBundledMapDataForLevel(safeLevelId);
+    }
+
+    logRunMapSource(levelId) {
+      const safeLevelId = String(levelId || "").trim();
+      const bundledMapPath = this.getBundledLevelMapPath(safeLevelId);
+      const sourceType = this.levelMapDataSourceCache[safeLevelId];
+      if (sourceType === "inline") {
+        const isFileOrigin =
+          typeof window !== "undefined" &&
+          window.location &&
+          String(window.location.protocol || "").toLowerCase() === "file:";
+        if (isFileOrigin) {
+          console.log(`[RLGame] Map source for ${safeLevelId}: inline bundled map data fallback (file:// fetch blocked by browser CORS)`);
+          return;
+        }
+        console.log(`[RLGame] Map source for ${safeLevelId}: inline bundled map data fallback`);
+        return;
+      }
+      if (bundledMapPath) {
+        console.log(`[RLGame] Map source for ${safeLevelId}: ${bundledMapPath}`);
+        return;
+      }
+      console.log(`[RLGame] Map source for ${safeLevelId || "unknown"}: no bundled map JSON configured`);
+    }
+
+    async startRunFromSelection() {
       const character = this.getSelectedCharacter();
       if (!character) {
         this.ui.setHomeStatus("Select a character first.");
         return;
       }
       const selection = this.resolveSelectionForCharacter(character);
+      await this.ensureBundledLevelDataReady(selection.level && selection.level.id);
+      this.logRunMapSource(selection.level && selection.level.id);
       this.currentRun = this.createRunState(character, selection.level, selection.difficulty);
       this.ui.showGameScreen();
       this.ui.hidePause();
@@ -4744,7 +5212,7 @@
       this.playBackgroundMusic();
     }
 
-    restartRun() {
+    async restartRun() {
       if (!this.currentRun) return;
       const character = SAVE.getCharacter(this.currentRun.characterId);
       if (!character) return;
@@ -4753,6 +5221,8 @@
         this.currentRun.level && this.currentRun.level.id,
         this.currentRun.difficulty
       );
+      await this.ensureBundledLevelDataReady(selection.level && selection.level.id);
+      this.logRunMapSource(selection.level && selection.level.id);
       this.currentRun = this.createRunState(character, selection.level, selection.difficulty);
       this.ui.showGameScreen();
       this.ui.hidePause();
@@ -4772,12 +5242,14 @@
         ? run.playerStart
         : null;
       if (configuredStart) {
-        run.player.x = clamp(Number(configuredStart.x), 0, run.world.width);
-        run.player.y = clamp(Number(configuredStart.y), 0, run.world.height);
+        run.player.worldX = Number(configuredStart.x);
+        run.player.worldY = Number(configuredStart.y);
       } else {
-        run.player.x = run.world.width * 0.5;
-        run.player.y = run.world.height * 0.5;
+        run.player.worldX = run.world.width * 0.5;
+        run.player.worldY = run.world.height * 0.5;
       }
+      this.clampPlayerToWorldBounds(run.player, run.world);
+      this.updateCameraForRun(run);
     }
 
     returnHome() {
@@ -4872,6 +5344,7 @@
     updatePlayerMovement(dt) {
       const run = this.currentRun;
       const player = run.player;
+      this.syncPlayerWorldPosition(player);
       const keys = this.input.keys;
       const effects = run.attributeEffects || this.calculateAttributeEffects(run.attributes);
       const speedBoostMultiplier = player.speedBoostTimer > 0 ? effects.damageTakenSpeedBoostPct : 0;
@@ -4900,14 +5373,11 @@
       const travelX = moveX * player.moveSpeed * dt;
       const travelY = moveY * player.moveSpeed * dt;
       if (travelX !== 0 || travelY !== 0) {
-        // Player stays camera-centered while the world scrolls in the opposite direction.
-        const appliedShift = this.applyWorldShiftWithObstacleCollision(-travelX, -travelY);
-        run.worldOffset.x += -appliedShift.x;
-        run.worldOffset.y += -appliedShift.y;
+        this.applyPlayerMovementWithObstacleCollision(travelX, travelY);
       }
       this.updateTerrainSpawningOnMovement(dt, moveX, moveY);
-
-      this.centerPlayerInWorld();
+      this.clampPlayerToWorldBounds(player, run.world);
+      this.updateCameraForRun(run);
     }
 
     applyWorldShift(shiftX, shiftY) {
@@ -5072,14 +5542,14 @@
       const splashRadius = Math.max(0, Number(radius || 0));
       const splashDamage = Math.max(0, Number(damage || 0));
       if (splashRadius <= 0 || splashDamage <= 0) return;
-      const splashSq = splashRadius * splashRadius;
 
       run.entities.enemies.forEach((enemy) => {
         if (!enemy || enemy.dead) return;
         if (enemy.id === primaryEnemyId) return;
         const dx = enemy.x - centerX;
         const dy = enemy.y - centerY;
-        if (dx * dx + dy * dy > splashSq) return;
+        const effectiveRadius = splashRadius + Math.max(0, Number(enemy.radius || 0));
+        if (dx * dx + dy * dy > effectiveRadius * effectiveRadius) return;
         this.damageEnemy(enemy, splashDamage, "ranged");
       });
     }
@@ -5206,6 +5676,12 @@
       if (!definition) return null;
       const run = this.currentRun;
       const world = run.world;
+      const camera = this.getRunCamera(run) || {
+        x: Math.max(0, Number(run.player && run.player.x || 0) - FIXED_WORLD_WIDTH * 0.5),
+        y: Math.max(0, Number(run.player && run.player.y || 0) - FIXED_WORLD_HEIGHT * 0.5),
+        width: FIXED_WORLD_WIDTH,
+        height: FIXED_WORLD_HEIGHT
+      };
       const minute = timeSeconds / 60;
       const healthScale = 1 + minute * DATA.RUN.healthScalingPerMinute;
       const damageScale = 1 + minute * DATA.RUN.damageScalingPerMinute;
@@ -5218,20 +5694,32 @@
       const difficultySpeedScale = this.getDifficultyScalingValue(run, "enemySpeedMultiplier");
       const difficultyXpScale = this.getDifficultyScalingValue(run, "enemyXpMultiplier");
 
-      // Spawn on fixed world edges so distance remains resolution-independent.
-      const margin = 0;
+      // Spawn just outside the current camera window so enemies enter the visible region naturally.
+      const margin = Math.max(24, Number(definition.radius || 0) + 18);
       const chooseEdgeSpawnPosition = () => {
         const side = randInt(0, 3);
         if (side === 0) {
-          return { x: randRange(-margin, world.width + margin), y: -margin };
+          return {
+            x: clamp(randRange(Number(camera.x || 0), Number(camera.x || 0) + Number(camera.width || 0)), 0, world.width),
+            y: Math.max(0, Number(camera.y || 0) - margin)
+          };
         }
         if (side === 1) {
-          return { x: world.width + margin, y: randRange(-margin, world.height + margin) };
+          return {
+            x: Math.min(world.width, Number(camera.x || 0) + Number(camera.width || 0) + margin),
+            y: clamp(randRange(Number(camera.y || 0), Number(camera.y || 0) + Number(camera.height || 0)), 0, world.height)
+          };
         }
         if (side === 2) {
-          return { x: randRange(-margin, world.width + margin), y: world.height + margin };
+          return {
+            x: clamp(randRange(Number(camera.x || 0), Number(camera.x || 0) + Number(camera.width || 0)), 0, world.width),
+            y: Math.min(world.height, Number(camera.y || 0) + Number(camera.height || 0) + margin)
+          };
         }
-        return { x: -margin, y: randRange(-margin, world.height + margin) };
+        return {
+          x: Math.max(0, Number(camera.x || 0) - margin),
+          y: clamp(randRange(Number(camera.y || 0), Number(camera.y || 0) + Number(camera.height || 0)), 0, world.height)
+        };
       };
 
       let x = 0;
@@ -5790,6 +6278,10 @@
           const dx = projectile.x - enemy.x;
           const dy = projectile.y - enemy.y;
           if (dx * dx + dy * dy > range * range) continue;
+          const bulwarkShieldUp =
+            String(enemy.typeId || "").trim() === "shieldbearer" &&
+            Number(enemy.maxShieldHp || 0) > 0 &&
+            Number(enemy.shieldHp || 0) > 0;
           projectile.hitMap[enemy.id] = true;
           this.damageEnemy(enemy, projectile.damage, "ranged");
           if (
@@ -5798,8 +6290,8 @@
             projectile.explosiveDamageMultiplier > 0
           ) {
             this.applyJavelinSplashDamage(
-              projectile.x,
-              projectile.y,
+              enemy.x,
+              enemy.y,
               projectile.explosiveRadius,
               projectile.damage * projectile.explosiveDamageMultiplier,
               enemy.id
@@ -5810,7 +6302,7 @@
             projectile.canMeteorSplit = false;
           }
           projectile.remainingHits -= 1;
-          if (projectile.remainingHits <= 0) {
+          if (bulwarkShieldUp || projectile.remainingHits <= 0) {
             consumed = true;
             break;
           }
@@ -6381,7 +6873,7 @@
       player.javelin.damage = (player.javelin.baseDamage + javelinMasteryFlatBonus) * damageMultiplier * (javelinUltimate && !usingSlingshot ? 1.1 : 1);
       if (usingSlingshot) {
         const fireRateBonus = Math.max(0, slingshotRapidPebblesRank) * 0.08;
-        const shatterRadiusByRank = [0, 8, 14, 20, 24, 28];
+        const shatterRadiusByRank = [0, 16, 28, 40, 48, 56];
         const shatterRadius = shatterRadiusByRank[Math.max(0, Math.min(5, slingshotShatterstoneRank))] || 0;
         player.javelin.cooldown = Math.max(0.1, player.javelin.baseCooldown * cooldownMultiplier * Math.max(0.55, 1 - fireRateBonus));
         player.javelin.speed = player.javelin.baseSpeed * 0.94;
@@ -6391,7 +6883,7 @@
         player.javelin.piercingVolleyActive = false;
         player.javelin.explosiveVolleyActive = shatterRadius > 0;
         player.javelin.explosiveRadius = shatterRadius;
-        player.javelin.explosiveDamageMultiplier = shatterRadius > 0 ? 0.7 : 0;
+        player.javelin.explosiveDamageMultiplier = shatterRadius > 0 ? 0.85 : 0;
         player.javelin.meteorBarrageActive = slingshotMeteorBarrage;
         player.javelin.meteorShardCount = slingshotMeteorBarrage ? 6 : 0;
         player.javelin.meteorShardLifetimeMultiplier = 0.42;
@@ -6790,6 +7282,7 @@
       if (!run) return;
       const ctx = this.ctx;
       const viewport = this.getRenderViewport(run);
+      const camera = this.getRunCamera(run) || { x: 0, y: 0 };
       const screenWidth = viewport.screenWidth;
       const screenHeight = viewport.screenHeight;
       const width = run.world.width;
@@ -6803,8 +7296,10 @@
       ctx.save();
       ctx.translate(viewport.offsetX, viewport.offsetY);
       ctx.scale(viewport.scale, viewport.scale);
+      ctx.translate(-Number(camera.x || 0), -Number(camera.y || 0));
 
       this.drawBackgroundGrid(width, height);
+      this.drawWorldEdgeBorder(width, height);
       this.drawFixedWorldGuides();
       this.drawObstacles();
       this.drawBossArenaBoundary();
@@ -6825,8 +7320,9 @@
     drawBackgroundGrid(width, height) {
       const ctx = this.ctx;
       const run = this.currentRun;
-      ctx.fillStyle = "#10151d";
+      ctx.fillStyle = (run && run.mapBackgroundBaseColor) || "#10151d";
       ctx.fillRect(0, 0, width, height);
+      this.drawRunMapBackgroundTile(run && run.mapBackgroundTile, width, height);
       const hasBackground = this.drawRunMapBackground(run && run.mapBackground, width, height);
       ctx.strokeStyle = "rgba(55, 70, 95, 0.28)";
       if (hasBackground) {
@@ -6834,22 +7330,34 @@
       }
       ctx.lineWidth = 1;
       const spacing = 48;
-      const worldOffset = run && run.worldOffset ? run.worldOffset : { x: 0, y: 0 };
-      const offsetX = ((worldOffset.x % spacing) + spacing) % spacing;
-      const offsetY = ((worldOffset.y % spacing) + spacing) % spacing;
-
-      for (let x = -offsetX; x <= width + spacing; x += spacing) {
+      for (let x = 0; x <= width + spacing; x += spacing) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, height);
         ctx.stroke();
       }
-      for (let y = -offsetY; y <= height + spacing; y += spacing) {
+      for (let y = 0; y <= height + spacing; y += spacing) {
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(width, y);
         ctx.stroke();
       }
+    }
+
+    drawWorldEdgeBorder(width, height) {
+      const ctx = this.ctx;
+      const borderWidth = Math.max(10, Math.min(width, height) * 0.0035);
+      const inset = borderWidth * 0.5;
+      ctx.save();
+      ctx.strokeStyle = "rgba(235, 54, 54, 0.96)";
+      ctx.lineWidth = borderWidth;
+      ctx.strokeRect(
+        inset,
+        inset,
+        Math.max(1, width - borderWidth),
+        Math.max(1, height - borderWidth)
+      );
+      ctx.restore();
     }
 
     drawFixedWorldGuides() {
@@ -6861,6 +7369,8 @@
       const centerX = width * 0.5;
       const centerY = height * 0.5;
       const spawnRingRadius = FIXED_WORLD_TILE_SIZE * 10;
+      const camera = this.getRunCamera(run);
+      const player = run.player;
 
       ctx.save();
       ctx.strokeStyle = "rgba(120, 220, 255, 0.7)";
@@ -6872,7 +7382,29 @@
       ctx.beginPath();
       ctx.arc(centerX, centerY, spawnRingRadius, 0, Math.PI * 2);
       ctx.stroke();
+      if (camera) {
+        ctx.strokeStyle = "rgba(134, 238, 184, 0.92)";
+        ctx.strokeRect(
+          Number(camera.x || 0),
+          Number(camera.y || 0),
+          Math.max(1, Number(camera.width || 0)),
+          Math.max(1, Number(camera.height || 0))
+        );
+      }
       ctx.setLineDash([]);
+      if (player) {
+        ctx.fillStyle = "rgba(240, 248, 255, 0.92)";
+        ctx.font = "14px Trebuchet MS, sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        const textX = camera ? Number(camera.x || 0) + 12 : 12;
+        const textY = camera ? Number(camera.y || 0) + 12 : 12;
+        ctx.fillText(
+          `Player ${Math.round(Number(player.worldX || player.x || 0))}, ${Math.round(Number(player.worldY || player.y || 0))}`,
+          textX,
+          textY
+        );
+      }
       ctx.restore();
     }
 
@@ -7244,8 +7776,8 @@
 
     drawEnemyProjectiles() {
       const ctx = this.ctx;
-      const glowColor = "rgba(255, 92, 92, 0.68)";
-      const glowBlur = 3;
+      const glowColor = "rgba(255, 196, 92, 0.92)";
+      const glowBlur = 12;
       this.currentRun.entities.enemyProjectiles.forEach((projectile) => {
         const projectileSprite = this.getEnemyProjectileSprite(projectile.sourceTypeId);
         if (projectileSprite) {
@@ -7260,8 +7792,20 @@
           ctx.save();
           ctx.translate(projectile.x, projectile.y);
           ctx.rotate(angle);
+          ctx.strokeStyle = "rgba(255, 196, 92, 0.22)";
+          ctx.lineCap = "round";
+          ctx.lineWidth = Math.max(10, renderHeight * 3.2);
+          ctx.beginPath();
+          ctx.moveTo(-renderLength * 0.42, 0);
+          ctx.lineTo(renderLength * 0.42, 0);
+          ctx.stroke();
+          ctx.shadowColor = "rgba(255, 223, 136, 0.98)";
+          ctx.shadowBlur = glowBlur * 1.45;
+          ctx.globalAlpha = 0.34;
+          ctx.drawImage(projectileSprite, -renderLength * 0.58, -renderHeight * 0.62, renderLength * 1.16, renderHeight * 1.24);
           ctx.shadowColor = glowColor;
           ctx.shadowBlur = glowBlur;
+          ctx.globalAlpha = 1;
           ctx.drawImage(projectileSprite, -renderLength * 0.5, -renderHeight * 0.5, renderLength, renderHeight);
           ctx.restore();
           ctx.imageSmoothingEnabled = previousSmoothing;
@@ -7271,6 +7815,10 @@
         ctx.save();
         ctx.shadowColor = glowColor;
         ctx.shadowBlur = glowBlur;
+        ctx.fillStyle = "rgba(255, 196, 92, 0.24)";
+        ctx.beginPath();
+        ctx.arc(projectile.x, projectile.y, projectile.radius * 2.25, 0, Math.PI * 2);
+        ctx.fill();
         ctx.fillStyle = projectile.radius >= 7 ? "#ff4972" : "#ff9d84";
         ctx.beginPath();
         ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2);
@@ -7514,16 +8062,23 @@
       const run = this.currentRun;
       if (!run || !run.entities || !Array.isArray(run.entities.pickups) || !run.entities.pickups.length) return;
       const player = run.player;
-      const width = run.world.width;
-      const height = run.world.height;
-      if (!player || width <= 0 || height <= 0) return;
+      const camera = this.getRunCamera(run);
+      if (!player || !camera) return;
 
       const nearestByType = {};
       run.entities.pickups.forEach((pickup) => {
         if (!pickup) return;
         const indicatorInfo = this.getPowerupIndicatorInfo(pickup.type);
         if (!indicatorInfo) return;
-        const onScreen = pickup.x >= 0 && pickup.x <= width && pickup.y >= 0 && pickup.y <= height;
+        const cameraLeft = Number(camera.x || 0);
+        const cameraTop = Number(camera.y || 0);
+        const cameraRight = cameraLeft + Number(camera.width || 0);
+        const cameraBottom = cameraTop + Number(camera.height || 0);
+        const onScreen =
+          pickup.x >= cameraLeft &&
+          pickup.x <= cameraRight &&
+          pickup.y >= cameraTop &&
+          pickup.y <= cameraBottom;
         if (onScreen) return;
 
         const dx = pickup.x - player.x;
@@ -7547,18 +8102,30 @@
       if (!entries.length) return;
       const ctx = this.ctx;
       const inset = 22;
-      const halfW = Math.max(1, width * 0.5 - inset);
-      const halfH = Math.max(1, height * 0.5 - inset);
+      const minX = Number(camera.x || 0) + inset;
+      const maxX = Number(camera.x || 0) + Number(camera.width || 0) - inset;
+      const minY = Number(camera.y || 0) + inset;
+      const maxY = Number(camera.y || 0) + Number(camera.height || 0) - inset;
       const pulse = 0.92 + Math.sin(run.time * 4.5) * 0.08;
 
       entries.forEach((entry) => {
         const dir = normalizeVector(entry.dx, entry.dy);
         if (!dir.x && !dir.y) return;
-        const tx = Math.abs(dir.x) < 0.0001 ? Number.POSITIVE_INFINITY : halfW / Math.abs(dir.x);
-        const ty = Math.abs(dir.y) < 0.0001 ? Number.POSITIVE_INFINITY : halfH / Math.abs(dir.y);
-        const t = Math.min(tx, ty);
-        const anchorX = player.x + dir.x * t;
-        const anchorY = player.y + dir.y * t;
+        const tx =
+          Math.abs(dir.x) < 0.0001
+            ? Number.POSITIVE_INFINITY
+            : dir.x > 0
+              ? (maxX - player.x) / dir.x
+              : (minX - player.x) / dir.x;
+        const ty =
+          Math.abs(dir.y) < 0.0001
+            ? Number.POSITIVE_INFINITY
+            : dir.y > 0
+              ? (maxY - player.y) / dir.y
+              : (minY - player.y) / dir.y;
+        const t = Math.max(0, Math.min(tx, ty));
+        const anchorX = clamp(player.x + dir.x * t, minX, maxX);
+        const anchorY = clamp(player.y + dir.y * t, minY, maxY);
         const angle = Math.atan2(dir.y, dir.x);
         const info = entry.indicatorInfo;
         const token = this.getPowerupIndicatorToken(info.label);

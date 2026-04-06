@@ -11,7 +11,7 @@
     <header class="topbar">
       <div class="topbar-title">
         <h1>Skill Prompt Manager</h1>
-        <p>Template-driven Midjourney prompts + skill icon library audit.</p>
+        <p>Midjourney prompt builder and skill icon library audit.</p>
       </div>
       <div class="topbar-actions">
         <a class="btn" href="../index.html">Tools</a>
@@ -21,39 +21,6 @@
     </header>
 
     <main class="workspace">
-      <section id="templateLibraryPanel" class="panel templates-panel collapsed">
-        <div id="templateLibraryHeader" class="panel-head accordion-head" role="button" tabindex="0" aria-controls="templateLibraryContent" aria-expanded="false">
-          <h2>Template Library</h2>
-          <div class="head-row">
-            <span id="templateLibraryChevron" class="accordion-chevron" aria-hidden="true">></span>
-            <label for="templateFilterCategory">Category</label>
-            <select id="templateFilterCategory" class="input"></select>
-          </div>
-        </div>
-        <div id="templateLibraryContent" class="template-library-content">
-          <div id="templateList" class="template-list"></div>
-          <div class="action-row">
-            <button id="newTemplateBtn" class="btn" type="button">New</button>
-            <button id="duplicateTemplateBtn" class="btn" type="button">Duplicate</button>
-            <button id="deleteTemplateBtn" class="btn btn-danger" type="button">Delete</button>
-          </div>
-          <hr>
-          <div class="field-grid">
-            <label for="templateNameInput">Template Name</label>
-            <input id="templateNameInput" class="input" type="text" maxlength="80">
-
-            <label for="templateCategoryInput">Category</label>
-            <input id="templateCategoryInput" class="input" type="text" maxlength="48" placeholder="Global">
-
-            <label for="templateTagsInput">Tags (comma separated)</label>
-            <input id="templateTagsInput" class="input" type="text" maxlength="240" placeholder="icon, top-down, dark fantasy">
-
-            <label for="templatePromptInput">Base Prompt</label>
-            <textarea id="templatePromptInput" class="input" rows="8" placeholder="top-down fantasy skill icon, ..."></textarea>
-          </div>
-        </div>
-      </section>
-
       <section class="panel builder-panel">
         <h2>Prompt Builder</h2>
         <div class="builder-sections">
@@ -118,20 +85,26 @@
             <div class="builder-accordion-body">
               <p class="muted">Class identity and color language applied consistently across class, weapon, and generic skills.</p>
               <div class="field-grid">
-                <div class="compact-controls-row cols-3">
+                <div class="compact-controls-row cols-1">
                   <div class="compact-control">
                     <label for="classFlavorSelect">Class Type</label>
                     <select id="classFlavorSelect" class="input"></select>
                   </div>
+                </div>
+                <div class="compact-controls-row cols-2">
                   <div class="compact-control">
-                    <label for="classRulesTemplateScopeSelect">Rules Scope</label>
-                    <select id="classRulesTemplateScopeSelect" class="input">
-                      <option value="class">Class</option>
-                      <option value="weapon">Weapon</option>
-                    </select>
+                    <label for="classFlavorNameInput">Class Type Name</label>
+                    <input id="classFlavorNameInput" class="input" type="text" maxlength="48" placeholder="Enter a class type name">
+                  </div>
+                  <div class="compact-control">
+                    <label>Class Type Actions</label>
+                    <div class="inline-row class-type-actions">
+                      <button id="renameClassFlavorBtn" class="btn" type="button">Rename</button>
+                      <button id="newClassFlavorBtn" class="btn" type="button">New Class Type</button>
+                    </div>
                   </div>
                 </div>
-                <p id="classFlavorHint" class="muted class-flavor-hint"></p>
+                <p id="classFlavorStatus" class="muted class-flavor-status">Use the selected class type or create a new one from it.</p>
                 <div class="compact-controls-row cols-2">
                   <div class="compact-control">
                     <label for="modifierColorInput">Class Color Theme Override (optional)</label>
@@ -142,6 +115,8 @@
                     <input id="classExclusionsInput" class="input" type="text" placeholder="no holy symbols, no futuristic armor, no ornate filigree">
                   </div>
                 </div>
+                <label for="classThemeInput">Class Theme</label>
+                <textarea id="classThemeInput" class="input" rows="3" placeholder="General class notes to include in the prompt, like brutal melee identity, heavy silhouettes, scorched battlefields..."></textarea>
 
                 <label>Class Palette</label>
                 <div class="class-palette-panel">
@@ -255,10 +230,7 @@
           <input id="skillNameInput" class="input" type="text" maxlength="120">
 
           <label for="skillClassInput">Class</label>
-          <input id="skillClassInput" class="input" type="text" maxlength="48" placeholder="barbarian">
-
-          <label for="skillCategoryInput">Category</label>
-          <input id="skillCategoryInput" class="input" type="text" maxlength="64" placeholder="Attack, Passive, Utility">
+          <select id="skillClassInput" class="input"></select>
 
           <label for="skillTierSelect">Skill Type</label>
           <select id="skillTierSelect" class="input">
@@ -271,9 +243,6 @@
             <input id="skillFolderPathInput" class="input" type="text" placeholder="assets/skills/class/barbarian/ground_slam">
             <button id="suggestPathBtn" class="btn" type="button">Suggest</button>
           </div>
-
-          <label for="skillTagsInput">Tags (comma separated)</label>
-          <input id="skillTagsInput" class="input" type="text" maxlength="240" placeholder="aoe, barbarian, impact">
         </div>
 
         <div class="version-row">

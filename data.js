@@ -2207,60 +2207,60 @@
 
   const TERRAIN_TYPES = [
     {
-      id: "rock_cluster",
-      label: "Rock Cluster",
-      category: "small",
-      spritePath: "assets/terrain/rock-cluster.svg",
-      minWidth: 28,
-      maxWidth: 38,
-      minHeight: 24,
-      maxHeight: 34
-    },
-    {
-      id: "tree_stump",
-      label: "Tree Stump",
-      category: "small",
-      spritePath: "assets/terrain/tree-stump.svg",
-      minWidth: 24,
-      maxWidth: 34,
-      minHeight: 26,
-      maxHeight: 36
-    },
-    {
-      id: "crate_stack",
-      label: "Crate Stack",
-      category: "small",
-      spritePath: "assets/terrain/crate-stack.svg",
-      minWidth: 28,
-      maxWidth: 40,
+      id: "rock_med_1",
+      label: "Medium Rock 1",
+      category: "medium",
+      spritePath: "tools/terrain/rocks/rock-med-1.png",
+      minWidth: 34,
+      maxWidth: 52,
       minHeight: 28,
-      maxHeight: 40
+      maxHeight: 42
     },
     {
-      id: "broken_pillar",
-      label: "Broken Pillar",
+      id: "rock_med_2",
+      label: "Medium Rock 2",
       category: "medium",
-      spritePath: "assets/terrain/broken-pillar.svg",
-      minWidth: 30,
-      maxWidth: 42,
-      minHeight: 42,
-      maxHeight: 62
+      spritePath: "tools/terrain/rocks/rock-med-2.png",
+      minWidth: 34,
+      maxWidth: 52,
+      minHeight: 28,
+      maxHeight: 42
     },
     {
-      id: "bone_pile",
-      label: "Bone Pile",
-      category: "small",
-      spritePath: "assets/terrain/bone-pile.svg",
-      minWidth: 30,
-      maxWidth: 42,
-      minHeight: 22,
-      maxHeight: 30
-    },
-    {
-      id: "ruins_debris",
-      label: "Ruins Debris",
+      id: "rock_med_3",
+      label: "Medium Rock 3",
       category: "medium",
-      spritePath: "assets/terrain/ruins-debris.svg",
+      spritePath: "tools/terrain/rocks/rock-med-3.png",
+      minWidth: 34,
+      maxWidth: 52,
+      minHeight: 28,
+      maxHeight: 42
+    },
+    {
+      id: "rock_med_4",
+      label: "Medium Rock 4",
+      category: "medium",
+      spritePath: "tools/terrain/rocks/rock-med-4.png",
+      minWidth: 34,
+      maxWidth: 52,
+      minHeight: 28,
+      maxHeight: 42
+    },
+    {
+      id: "rock_med_5",
+      label: "Medium Rock 5",
+      category: "medium",
+      spritePath: "tools/terrain/rocks/rock-med-5.png",
+      minWidth: 34,
+      maxWidth: 52,
+      minHeight: 28,
+      maxHeight: 42
+    },
+    {
+      id: "rock_med_6",
+      label: "Medium Rock 6",
+      category: "medium",
+      spritePath: "tools/terrain/rocks/rock-med-6.png",
       minWidth: 34,
       maxWidth: 52,
       minHeight: 28,
@@ -2270,7 +2270,7 @@
 
   const OBSTACLES = {
     enabled: true,
-    useSprites: false,
+    useSprites: true,
     startWithTerrain: false,
     movementSpawnOnly: true,
     minCount: 8,

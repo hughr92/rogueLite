@@ -1817,7 +1817,7 @@ input {
 
 .class-skill-layout {
   display: grid;
-  grid-template-columns: 68px minmax(0, 1fr);
+  grid-template-columns: 102px minmax(0, 1fr);
   gap: 0.56rem;
   align-items: stretch;
 }
@@ -1835,7 +1835,7 @@ input {
 .class-skill-icon {
   width: 100%;
   height: 100%;
-  min-height: 76px;
+  min-height: 114px;
   border-radius: 8px;
   border: 1px solid #4f6287;
   background: rgba(12, 18, 30, 0.76);

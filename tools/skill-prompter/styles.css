@@ -64,7 +64,7 @@ body {
 .workspace {
   min-height: calc(100vh - 120px);
   display: grid;
-  grid-template-columns: minmax(300px, 0.9fr) minmax(430px, 1.15fr) minmax(460px, 1.2fr);
+  grid-template-columns: minmax(460px, 1.15fr) minmax(460px, 1.2fr);
   gap: 0.8rem;
 }
 
@@ -83,23 +83,9 @@ body {
   gap: 0.5rem;
 }
 
-.templates-panel .accordion-head {
-  cursor: pointer;
-  user-select: none;
-}
-
-.templates-panel .accordion-head:focus-visible,
 .skills-panel .accordion-head:focus-visible {
   outline: 1px solid #7fb3ff;
   outline-offset: 1px;
-}
-
-.template-library-content {
-  display: grid;
-}
-
-.templates-panel.collapsed .template-library-content {
-  display: none;
 }
 
 .skills-panel.collapsed .skill-entry-content {
@@ -210,6 +196,20 @@ body {
 .class-flavor-hint {
   margin: 0;
   padding: 0.18rem 0.06rem 0.04rem;
+}
+
+.class-flavor-status {
+  margin: 0;
+  padding: 0.08rem 0.06rem 0;
+}
+
+.class-type-actions {
+  min-height: 2.15rem;
+  align-items: stretch;
+}
+
+.class-type-actions .btn {
+  flex: 1;
 }
 
 .class-palette-panel {
@@ -423,7 +423,6 @@ textarea.input {
   gap: 0.45rem;
 }
 
-.template-list,
 .skill-list {
   margin-top: 0.55rem;
   border: 1px solid #2e415f;
@@ -447,7 +446,6 @@ textarea.input {
   letter-spacing: 0.03em;
 }
 
-.template-item,
 .skill-item {
   border: 1px solid #385178;
   background: #182338;
@@ -461,7 +459,6 @@ textarea.input {
   gap: 0.4rem;
 }
 
-.template-item.active,
 .skill-item.active {
   border-color: #7eb0ff;
   background: #21314b;
@@ -488,14 +485,12 @@ textarea.input {
   box-shadow: 0 0 0 1px rgba(241, 203, 114, 0.38) inset;
 }
 
-.template-item-main,
 .skill-item-main {
   min-width: 0;
   display: grid;
   gap: 0.08rem;
 }
 
-.template-name,
 .skill-name {
   font-weight: 600;
   font-size: 0.84rem;
@@ -504,7 +499,6 @@ textarea.input {
   text-overflow: ellipsis;
 }
 
-.template-meta,
 .skill-meta {
   color: var(--muted);
   font-size: 0.74rem;
@@ -710,7 +704,7 @@ hr {
 
 @media (max-width: 1500px) {
   .workspace {
-    grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1fr) minmax(420px, 1.1fr);
+    grid-template-columns: minmax(360px, 1fr) minmax(420px, 1.1fr);
   }
 }
 
